@@ -20,6 +20,17 @@ import numpy as np
 from typing import Dict, Any, List
 import traceback
 
+# Optuna for hyperparameter tuning
+OPTUNA_AVAILABLE = False
+try:
+    import optuna
+    OPTUNA_AVAILABLE = True
+except ImportError:
+    print("Optuna not installed. Hyperparameter tuning will be disabled.")
+    optuna = None
+
+
+
 # Step 1: Data pipeline
 from data_pipeline import make_dataset_for_task
 
@@ -29,11 +40,13 @@ PYTORCH_AVAILABLE = False
 try:
     import torch
     PYTORCH_AVAILABLE = True
-    from models import model_lstm, model_gru
+    from models import model_lstm, model_gru, model_rnn
 except ImportError:
-    print("Warning: PyTorch not available. LSTM and GRU models will be skipped.")
+    print("Warning: PyTorch not available. LSTM, GRU, and RNN models will be skipped.")
     model_lstm = None
     model_gru = None
+    model_rnn = None
+
 
 from models import model_rf
 
@@ -93,30 +106,80 @@ MODEL_REGISTRY["RF_price"] = {
     "description": "Random Forest for price prediction"
 }
 
+if PYTORCH_AVAILABLE and model_rnn is not None:
+    MODEL_REGISTRY["RNN_sign"] = {
+        "module": model_rnn,
+        "task_type": "sign",
+        "seq_len": config.SEQUENCE_LENGTH,
+        "description": "Simple RNN for direction prediction"
+    }
+    MODEL_REGISTRY["RNN_price"] = {
+        "module": model_rnn,
+        "task_type": "price",
+        "seq_len": config.SEQUENCE_LENGTH,
+        "description": "Simple RNN for price prediction"
+    }
+
+
 
 # =============================================================================
 # Helper Functions
 # =============================================================================
 
+# =============================================================================
+# Optuna Hyperparameter Tuning
+# =============================================================================
+
+USE_OPTUNA_TUNING = True  # flip to False if you want to turn tuning off globally
+
+
+def run_optuna_tuning(module, datasets, n_trials=10, metrics_task_type="regression"):
+    """
+    Run Optuna tuning for a deep learning model with signature:
+        train_and_predict(datasets, config)
+
+    Returns:
+        best_config: dict
+        best_score: float (loss being minimized)
+    """
+    X_train = datasets["X_train"]
+    y_val = np.array(datasets["y_val"])
+
+    def objective(trial):
+        # Define search space for RNN/LSTM/GRU-like models
+        config_dict = {
+            "hidden_size": trial.suggest_categorical("hidden_size", [16, 32, 64, 128, 256]),
+            "num_layers": trial.suggest_int("num_layers", 1, 3),
+            "dropout_rate": trial.suggest_float("dropout_rate", 0.0, 0.6, step=0.1),
+            "dense_units": trial.suggest_categorical("dense_units", [16, 32, 64, 128]),
+        }
+
+        result = module.train_and_predict(datasets, config=config_dict)
+        preds = np.array(result["y_pred_val"])
+
+        if metrics_task_type == "classification":
+            # Convert probs/logits into hard labels with 0.5 threshold
+            preds_labels = (preds >= 0.5).astype(int)
+            acc = np.mean(preds_labels == y_val)
+            loss = -acc  # maximize accuracy → minimize negative accuracy
+        else:
+            # Regression: minimize MSE
+            loss = np.mean((preds - y_val) ** 2)
+
+        return loss
+
+    study = optuna.create_study(direction="minimize")
+    study.optimize(objective, n_trials=n_trials)
+
+    print("\n[OPTUNA] Best hyperparameters:", study.best_params)
+    print("[OPTUNA] Best objective value:", study.best_value)
+
+    return study.best_params, study.best_value
+
+
 def run_single_model(name: str, spec: Dict[str, Any]) -> Dict[str, Any]:
     """
     Run one model end-to-end: data → train → evaluate
-    
-    Args:
-        name: Model name (key in registry)
-        spec: Model specification dict with keys:
-              - module: Python module with train_and_predict()
-              - task_type: "sign" or "price"
-              - seq_len: Sequence length (int or None for tabular)
-              - description: Human-readable description
-    
-    Returns:
-        Dict with all results:
-        - model_name: str
-        - task_type: str
-        - description: str
-        - base_*: prediction metrics (MAE/RMSE or Accuracy/F1/etc)
-        - trading_*: trading metrics (ROI, WinRate, Sharpe)
     """
     module = spec["module"]
     task_type = spec["task_type"]
@@ -131,7 +194,7 @@ def run_single_model(name: str, spec: Dict[str, Any]) -> Dict[str, Any]:
     print(f"Description: {description}")
     print()
     
-    # Step 1: Prepare data using unified pipeline
+    # Step 1: Prepare data
     print(f"[1/3] Loading data...")
     datasets = make_dataset_for_task(
         task_type=task_type,
@@ -141,12 +204,41 @@ def run_single_model(name: str, spec: Dict[str, Any]) -> Dict[str, Any]:
         scaler_type=config.SCALER_TYPE
     )
     print(f"      Train samples: {len(datasets['y_train'])}")
-    print(f"      Val samples: {len(datasets['y_val'])}")
-    print(f"      Test samples: {len(datasets['y_test'])}")
+    print(f"      Val samples:   {len(datasets['y_val'])}")
+    print(f"      Test samples:  {len(datasets['y_test'])}")
     
-    # Step 2: Train & predict using standard interface
+    # Decide metrics task type
+    metrics_task_type = "classification" if task_type == "sign" else "regression"
+    
+    # Step 2: Train & predict (with optional Optuna tuning)
     print(f"\n[2/3] Training model...")
-    out = module.train_and_predict(datasets, config=None)
+
+    is_deep_model = module not in [model_rf]
+
+    if (
+        USE_OPTUNA_TUNING
+        and OPTUNA_AVAILABLE
+        and PYTORCH_AVAILABLE
+        and is_deep_model
+    ):
+        print("      Using Optuna hyperparameter tuning.")
+        best_config, best_score = run_optuna_tuning(
+            module,
+            datasets,
+            n_trials=10,
+            metrics_task_type=metrics_task_type
+        )
+        print(f"      Best config: {best_config}")
+        print(f"      Best validation objective: {best_score:.6f}")
+        out = module.train_and_predict(datasets, config=best_config)
+        used_config = best_config
+    else:
+        if USE_OPTUNA_TUNING and not OPTUNA_AVAILABLE:
+            print("      Optuna not available, skipping tuning.")
+        elif USE_OPTUNA_TUNING and not is_deep_model:
+            print("      Tuning disabled for non-deep models (e.g., RF).")
+        out = module.train_and_predict(datasets, config=None)
+        used_config = None
     
     y_test = datasets["y_test"]
     y_pred_test = out["y_pred_test"]
@@ -156,9 +248,6 @@ def run_single_model(name: str, spec: Dict[str, Any]) -> Dict[str, Any]:
     
     # Step 3: Evaluate using unified metrics
     print(f"\n[3/3] Evaluating performance...")
-    
-    # Map internal task_type ("sign"/"price") to metrics task_type ("classification"/"regression")
-    metrics_task_type = "classification" if task_type == "sign" else "regression"
     
     base_metrics, trading_metrics = evaluate_model_outputs(
         task_type=metrics_task_type,
@@ -172,18 +261,17 @@ def run_single_model(name: str, spec: Dict[str, Any]) -> Dict[str, Any]:
         "model_name": name,
         "task_type": task_type,
         "description": description,
+        "best_config": used_config,
     }
     
     # Flatten metrics with prefixes
     for k, v in base_metrics.items():
-        # Handle confusion matrix specially
         if k == "Confusion_Matrix":
             result[f"base_{k}"] = str(v.tolist()) if isinstance(v, np.ndarray) else str(v)
         else:
             result[f"base_{k}"] = v
     
     for k, v in trading_metrics.items():
-        # Handle algo_returns_series - summarize instead of full array
         if k == "algo_returns_series":
             result["trading_algo_returns_mean"] = float(np.mean(v))
             result["trading_algo_returns_std"] = float(np.std(v))

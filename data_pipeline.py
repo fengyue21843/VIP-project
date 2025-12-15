@@ -49,8 +49,8 @@ def load_dataset() -> pd.DataFrame:
     # Determine the path to the dataset
     # Prioritize config.DATA_PATH, then fall back to hardcoded paths
     data_paths = [
-        config.DATA_PATH,
-        r"c:\Users\DELL\Downloads\Data-20251207T171745Z-1-001\Data\Data_cleaned_Dataset.csv",
+        r"C:\Users\Nancy Lonoff\OneDrive\Desktop\VIP\Final\Vip-project\Data_cleaned_Dataset.csv",
+        # r"c:\Users\DELL\Downloads\Data-20251207T171745Z-1-001\Data\Data_cleaned_Dataset.csv",
         "datasets/Data_cleaned_Dataset.csv",
         "../Data/Data_cleaned_Dataset.csv",
         "Data/Data_cleaned_Dataset.csv"
