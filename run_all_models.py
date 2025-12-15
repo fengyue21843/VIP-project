@@ -148,10 +148,10 @@ def run_optuna_tuning(module, datasets, n_trials=10, metrics_task_type="regressi
     def objective(trial):
         # Define search space for RNN/LSTM/GRU-like models
         config_dict = {
-            "hidden_size": trial.suggest_categorical("hidden_size", [16, 32, 64, 128, 256]),
+            "hidden_size": trial.suggest_categorical("hidden_size", [16, 32, 64, 128]),
             "num_layers": trial.suggest_int("num_layers", 1, 3),
             "dropout_rate": trial.suggest_float("dropout_rate", 0.0, 0.6, step=0.1),
-            "dense_units": trial.suggest_categorical("dense_units", [16, 32, 64, 128]),
+            "dense_units": trial.suggest_categorical("dense_units", [32, 64, 128]),
         }
 
         result = module.train_and_predict(datasets, config=config_dict)
