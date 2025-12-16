@@ -30,3 +30,5 @@ saved_models/
 best_params
 .claude
 train_models_notebook.ipynb
+results
+trained_models

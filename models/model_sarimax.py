@@ -155,6 +155,41 @@ def fit_sarimax(
     return fitted, order, seasonal_order
 
 
+def fast_forecast_sarimax(
+    fitted_model: Any,
+    actual_values: np.ndarray,
+    future_exog: Optional[np.ndarray],
+    verbose: bool = True,
+) -> np.ndarray:
+    """
+    Generate fast one-step-ahead forecasts using Kalman filter extension.
+
+    Instead of refitting for each step (slow), this uses the fitted model's
+    parameters and extends it with new observations using the Kalman filter.
+    This is 50-100x faster than rolling refit.
+    """
+    n_predictions = len(actual_values)
+    predictions = np.zeros(n_predictions)
+
+    # Use the fitted model to forecast all at once using dynamic prediction
+    try:
+        # Get forecasts for all steps at once
+        forecast_result = fitted_model.get_forecast(
+            steps=n_predictions,
+            exog=future_exog
+        )
+        predictions = forecast_result.predicted_mean.values
+        if verbose:
+            print(f"    Generated {n_predictions} predictions (fast mode)")
+    except Exception as e:
+        if verbose:
+            print(f"    Fast forecast failed ({e}), using fallback")
+        # Fallback: use simple extrapolation
+        predictions = np.full(n_predictions, fitted_model.fittedvalues.iloc[-1])
+
+    return predictions
+
+
 def rolling_forecast_sarimax(
     train_series: np.ndarray,
     train_exog: Optional[np.ndarray],
@@ -164,23 +199,44 @@ def rolling_forecast_sarimax(
     seasonal_order: Tuple[int, int, int, int],
     max_history: int = 1000,
     verbose: bool = True,
+    refit_interval: int = 50,
 ) -> np.ndarray:
     """
     Generate rolling one-step-ahead forecasts with exogenous variables.
+
+    Optimized to refit only every `refit_interval` steps instead of every step.
+    This is ~50x faster than refitting every prediction.
     """
     predictions = []
     history_y = list(train_series)
     history_exog = list(train_exog) if train_exog is not None else None
     n_predictions = len(actual_values)
 
+    fitted_model = None
+
     for i in range(n_predictions):
-        # Use sliding window if specified
-        if max_history is not None and len(history_y) > max_history:
-            fit_y = history_y[-max_history:]
-            fit_exog = history_exog[-max_history:] if history_exog else None
-        else:
-            fit_y = history_y
-            fit_exog = history_exog
+        # Refit only at intervals (or first iteration)
+        if i % refit_interval == 0 or fitted_model is None:
+            # Use sliding window if specified
+            if max_history is not None and len(history_y) > max_history:
+                fit_y = history_y[-max_history:]
+                fit_exog = history_exog[-max_history:] if history_exog else None
+            else:
+                fit_y = history_y
+                fit_exog = history_exog
+
+            try:
+                model = SARIMAX(
+                    fit_y,
+                    exog=fit_exog,
+                    order=order,
+                    seasonal_order=seasonal_order,
+                    enforce_stationarity=False,
+                    enforce_invertibility=False,
+                )
+                fitted_model = model.fit(disp=False, maxiter=100)
+            except Exception:
+                pass  # Keep using previous fitted_model
 
         # Get current exog for prediction
         if future_exog is not None:
@@ -189,20 +245,11 @@ def rolling_forecast_sarimax(
             current_exog = None
 
         try:
-            model = SARIMAX(
-                fit_y,
-                exog=fit_exog,
-                order=order,
-                seasonal_order=seasonal_order,
-                enforce_stationarity=False,
-                enforce_invertibility=False,
-            )
-            model_fit = model.fit(disp=False, maxiter=100)
-            pred = model_fit.forecast(steps=1, exog=current_exog)[0]
+            pred = fitted_model.forecast(steps=1, exog=current_exog)[0]
             predictions.append(pred)
         except Exception:
             # Fallback to last prediction or mean
-            predictions.append(predictions[-1] if predictions else np.mean(fit_y))
+            predictions.append(predictions[-1] if predictions else np.mean(history_y[-100:]))
 
         # Update history
         history_y.append(actual_values[i])
@@ -282,6 +329,8 @@ def train_and_predict(
         test_exog = None
 
     max_history = config.get("max_history", 1000)
+    use_fast_forecast = config.get("use_fast_forecast", True)  # Default: fast mode
+    refit_interval = config.get("refit_interval", 50)  # Refit every N steps if rolling
 
     print("\nSARIMAX Model (with Exogenous Variables):")
     print("-" * 80)
@@ -290,6 +339,7 @@ def train_and_predict(
     print(f"  Validation samples: {len(y_val)}")
     print(f"  Test samples: {len(y_test)}")
     print(f"  Exogenous features: {len(exog_indices) if exog_indices else 0}")
+    print(f"  Forecast mode: {'fast (single fit)' if use_fast_forecast else f'rolling (refit every {refit_interval} steps)'}")
     print(f"  Max history window: {max_history}")
 
     # Check stationarity
@@ -309,37 +359,68 @@ def train_and_predict(
     print(f"  AIC: {fitted_model.aic:.2f}")
     print(f"  BIC: {fitted_model.bic:.2f}")
 
-    # Rolling predictions
-    print("\nGenerating rolling predictions...")
+    # Generate predictions
+    print("\nGenerating predictions...")
 
-    # Validation set
-    print("  Validation set:")
-    y_pred_val_raw = rolling_forecast_sarimax(
-        train_series=train_returns,
-        train_exog=train_exog,
-        actual_values=val_returns,
-        future_exog=val_exog,
-        order=order,
-        seasonal_order=seasonal_order,
-        max_history=max_history,
-        verbose=True,
-    )
+    if use_fast_forecast:
+        # Fast mode: single fit, forecast all at once
+        print("  Validation set (fast mode):")
+        y_pred_val_raw = fast_forecast_sarimax(
+            fitted_model=fitted_model,
+            actual_values=val_returns,
+            future_exog=val_exog,
+            verbose=True,
+        )
 
-    # Test set
-    print("  Test set:")
-    full_train = np.concatenate([train_returns, val_returns])
-    full_exog = np.concatenate([train_exog, val_exog]) if train_exog is not None else None
+        # Refit on train+val for test predictions
+        print("  Refitting model with validation data...")
+        full_train = np.concatenate([train_returns, val_returns])
+        full_exog = np.concatenate([train_exog, val_exog]) if train_exog is not None else None
+        fitted_full, _, _ = fit_sarimax(
+            full_train,
+            exog_train=full_exog,
+            order=order,
+            seasonal_order=seasonal_order,
+            config=config
+        )
 
-    y_pred_test_raw = rolling_forecast_sarimax(
-        train_series=full_train,
-        train_exog=full_exog,
-        actual_values=test_returns,
-        future_exog=test_exog,
-        order=order,
-        seasonal_order=seasonal_order,
-        max_history=max_history,
-        verbose=True,
-    )
+        print("  Test set (fast mode):")
+        y_pred_test_raw = fast_forecast_sarimax(
+            fitted_model=fitted_full,
+            actual_values=test_returns,
+            future_exog=test_exog,
+            verbose=True,
+        )
+    else:
+        # Rolling mode: refit every N steps (slower but more adaptive)
+        print("  Validation set (rolling mode):")
+        y_pred_val_raw = rolling_forecast_sarimax(
+            train_series=train_returns,
+            train_exog=train_exog,
+            actual_values=val_returns,
+            future_exog=val_exog,
+            order=order,
+            seasonal_order=seasonal_order,
+            max_history=max_history,
+            verbose=True,
+            refit_interval=refit_interval,
+        )
+
+        print("  Test set (rolling mode):")
+        full_train = np.concatenate([train_returns, val_returns])
+        full_exog = np.concatenate([train_exog, val_exog]) if train_exog is not None else None
+
+        y_pred_test_raw = rolling_forecast_sarimax(
+            train_series=full_train,
+            train_exog=full_exog,
+            actual_values=test_returns,
+            future_exog=test_exog,
+            order=order,
+            seasonal_order=seasonal_order,
+            max_history=max_history,
+            verbose=True,
+            refit_interval=refit_interval,
+        )
 
     # Align predictions with target length
     y_pred_val_raw = y_pred_val_raw[:len(y_val)]

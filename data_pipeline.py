@@ -519,7 +519,7 @@ def _validate_dataset(datasets: Dict[str, Any], is_torch: bool) -> None:
             assert not np.isnan(data).any(), f"{key} contains NaN"
             assert not np.isinf(data).any(), f"{key} contains Inf"
     
-    print("✓ Dataset validation passed!")
+    print("[OK] Dataset validation passed!")
 
 
 if __name__ == "__main__":

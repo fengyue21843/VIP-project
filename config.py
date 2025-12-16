@@ -114,6 +114,8 @@ SARIMAX_CONFIG = {
         "IS_WORKDAY",
     ],
     "max_history": 1000,                    # Sliding window for rolling forecast
+    "use_fast_forecast": True,              # Fast mode: single fit, multi-step forecast (50x faster)
+    "refit_interval": 50,                   # Rolling mode only: refit every N steps
 }
 
 # SVR Configuration (Support Vector Regression)
