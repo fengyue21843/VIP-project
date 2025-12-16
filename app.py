@@ -765,12 +765,18 @@ def run_ml_model_ui(data: pd.DataFrame):
             # Display results
             st.subheader("Model Performance")
 
-            # Prediction metrics
+            # Prediction metrics - display in rows to avoid truncation
             st.write("**Prediction Metrics:**")
-            pred_cols = st.columns(len(base_metrics))
-            for idx, (metric_name, value) in enumerate(base_metrics.items()):
-                if metric_name != "Confusion_Matrix":
-                    with pred_cols[idx]:
+
+            # Filter out confusion matrix and separate metrics
+            display_metrics = {k: v for k, v in base_metrics.items() if k != "Confusion_Matrix"}
+
+            # Display in rows of 4 metrics to avoid label truncation
+            metric_items = list(display_metrics.items())
+            for i in range(0, len(metric_items), 4):
+                cols = st.columns(4)
+                for j, (metric_name, value) in enumerate(metric_items[i:i+4]):
+                    with cols[j]:
                         if isinstance(value, float):
                             st.metric(metric_name, f"{value:.4f}")
                         else:
