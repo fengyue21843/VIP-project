@@ -40,12 +40,14 @@ PYTORCH_AVAILABLE = False
 try:
     import torch
     PYTORCH_AVAILABLE = True
-    from models import model_lstm, model_gru, model_rnn
+    from models import model_lstm, model_gru, model_rnn, model_rnn_bidir, model_rnn_attn 
 except ImportError:
     print("Warning: PyTorch not available. LSTM, GRU, and RNN models will be skipped.")
     model_lstm = None
     model_gru = None
     model_rnn = None
+    model_rnn_bidir = None
+    model_rnn_attn = None
 
 
 from models import model_rf
@@ -120,6 +122,33 @@ if PYTORCH_AVAILABLE and model_rnn is not None:
         "description": "Simple RNN for price prediction"
     }
 
+if PYTORCH_AVAILABLE and model_rnn_bidir is not None:
+    MODEL_REGISTRY["BiRNN_sign"] = {
+        "module": model_rnn_bidir,
+        "task_type": "sign",
+        "seq_len": config.SEQUENCE_LENGTH,
+        "description": "Bidirectional RNN for direction prediction"
+    }
+    MODEL_REGISTRY["BiRNN_price"] = {
+        "module": model_rnn_bidir,
+        "task_type": "price",
+        "seq_len": config.SEQUENCE_LENGTH,
+        "description": "Bidirectional RNN for price prediction"
+    }
+
+if PYTORCH_AVAILABLE and model_rnn_attn is not None:
+    MODEL_REGISTRY["RNNATTN_sign"] = {
+        "module": model_rnn_attn,
+        "task_type": "sign",
+        "seq_len": config.SEQUENCE_LENGTH,
+        "description": "SimpleRNN + Attention for direction prediction",
+    }
+    MODEL_REGISTRY["RNNATTN_price"] = {
+        "module": model_rnn_attn,
+        "task_type": "price",
+        "seq_len": config.SEQUENCE_LENGTH,
+        "description": "SimpleRNN + Attention for price prediction",
+    },
 
 
 # =============================================================================
@@ -154,7 +183,7 @@ def run_optuna_tuning(module, datasets, n_trials=10, metrics_task_type="regressi
             "dense_units": trial.suggest_categorical("dense_units", [32, 64, 128]),
         }
 
-        result = module.train_and_predict(datasets, config=config_dict)
+        result = module.train_and_predict(datasets, config_dict)
         preds = np.array(result["y_pred_val"])
 
         if metrics_task_type == "classification":
@@ -230,14 +259,14 @@ def run_single_model(name: str, spec: Dict[str, Any]) -> Dict[str, Any]:
         )
         print(f"      Best config: {best_config}")
         print(f"      Best validation objective: {best_score:.6f}")
-        out = module.train_and_predict(datasets, config=best_config)
+        out = module.train_and_predict(datasets, best_config)
         used_config = best_config
     else:
         if USE_OPTUNA_TUNING and not OPTUNA_AVAILABLE:
             print("      Optuna not available, skipping tuning.")
         elif USE_OPTUNA_TUNING and not is_deep_model:
             print("      Tuning disabled for non-deep models (e.g., RF).")
-        out = module.train_and_predict(datasets, config=None)
+        out = module.train_and_predict(datasets, None)
         used_config = None
     
     y_test = datasets["y_test"]

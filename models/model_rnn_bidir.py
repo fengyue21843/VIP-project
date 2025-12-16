@@ -20,28 +20,29 @@ from training_utils import set_global_seed, standard_compile_and_train
 # Set random seeds for reproducibility
 set_global_seed(config.RANDOM_SEED)
 
-
-class SimpleRNNModel(nn.Module):
+class BiRNNModel(nn.Module):
     """
-    Base RNN model for time series.
+    Bidirectional RNN model.
 
-    Input shape: (batch, seq_len, n_features)
-    Output: single value/logit per sample.
+    Input:  (batch, seq_len, n_features)
+    Output: (batch, 1)
     """
-    def __init__(self, n_features: int, config: dict | None = None):
+    def __init__(self, n_features: int, config_dict: dict | None = None):
         super().__init__()
 
-        # Default hyperparameters (can be overridden via config dict)
         hidden_size = 64
         num_layers = 1
         dropout_rate = 0.2
         dense_units = 32
 
-        if config is not None:
-            hidden_size = config.get("hidden_size", hidden_size)
-            num_layers = config.get("num_layers", num_layers)
-            dropout_rate = config.get("dropout_rate", dropout_rate)
-            dense_units = config.get("dense_units", dense_units)
+        if config_dict is not None:
+            hidden_size = config_dict.get("hidden_size", hidden_size)
+            num_layers = config_dict.get("num_layers", num_layers)
+            dropout_rate = config_dict.get("dropout_rate", dropout_rate)
+            dense_units = config_dict.get("dense_units", dense_units)
+
+        # NOTE: PyTorch only applies dropout between layers when num_layers > 1
+        rnn_dropout = dropout_rate if num_layers > 1 else 0.0
 
         self.rnn = nn.RNN(
             input_size=n_features,
@@ -49,37 +50,46 @@ class SimpleRNNModel(nn.Module):
             num_layers=num_layers,
             batch_first=True,
             nonlinearity="tanh",
+            bidirectional=True,
+            dropout=rnn_dropout,
         )
 
         self.dropout = nn.Dropout(dropout_rate)
-        self.fc1 = nn.Linear(hidden_size, dense_units)
+
+        # bidirectional doubles the hidden size
+        self.fc1 = nn.Linear(hidden_size * 2, dense_units)
         self.fc2 = nn.Linear(dense_units, 1)
         self.relu = nn.ReLU()
 
     def forward(self, x: torch.Tensor) -> torch.Tensor:
-        rnn_out, _ = self.rnn(x)      
-        last_hidden = rnn_out[:, -1, :]  
+        # x: (batch, seq_len, n_features)
+        rnn_out, h_n = self.rnn(x)
+        # rnn_out: (batch, seq_len, hidden_size*2)
+
+        # Use last timestep output (already includes both directions)
+        last_hidden = rnn_out[:, -1, :]  # (batch, hidden_size*2)
+
         x = self.dropout(last_hidden)
         x = self.relu(self.fc1(x))
         x = self.dropout(x)
-        x = self.fc2(x)                   
+        x = self.fc2(x)
         return x
+
 
 
 def build_model(input_shape: tuple, config_dict: dict | None = None) -> nn.Module:
     """
-    Build the SimpleRNN model.
+    Build the Bidirectional RNN model.
 
     Args:
         input_shape: (timesteps, features)
-        config: optional hyperparameter overrides
+        config_dict: optional hyperparameter overrides
 
     Returns:
         PyTorch model instance
     """
     _, n_features = input_shape
-    model = SimpleRNNModel(n_features, config_dict)
-    return model
+    return BiRNNModel(n_features, config_dict)
 
 
 

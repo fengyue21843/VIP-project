@@ -27,6 +27,7 @@ except ImportError:
     TORCH_AVAILABLE = False
     print("Warning: PyTorch not available. Set return_torch=False")
 
+_UNSET = object()
 
 # Type definitions
 TaskType = Literal["sign", "price"]
@@ -49,6 +50,7 @@ def load_dataset() -> pd.DataFrame:
     # Determine the path to the dataset
     # Prioritize config.DATA_PATH, then fall back to hardcoded paths
     data_paths = [
+        "Data_cleaned_Dataset.csv", 
         r"C:\Users\Nancy Lonoff\OneDrive\Desktop\VIP\Final\Vip-project\Data_cleaned_Dataset.csv",
         # r"c:\Users\DELL\Downloads\Data-20251207T171745Z-1-001\Data\Data_cleaned_Dataset.csv",
         "datasets/Data_cleaned_Dataset.csv",
@@ -293,7 +295,7 @@ def create_sequences(
 
 def make_dataset_for_task(
     task_type: TaskType | None = None,
-    seq_len: int | None = None,
+    seq_len: int | None = _UNSET,
     test_size: float | None = None,
     val_size: float | None = None,
     scaler_type: ScalerType | None = None,
@@ -340,8 +342,10 @@ def make_dataset_for_task(
         val_size = config.VAL_SIZE
     if scaler_type is None:
         scaler_type = config.SCALER_TYPE
-    if seq_len is None and hasattr(config, 'SEQUENCE_LENGTH'):
-        seq_len = config.SEQUENCE_LENGTH
+    if seq_len is _UNSET:
+        seq_len = getattr(config, "SEQUENCE_LENGTH", None)
+    # if seq_len is None: keep it None => tabular
+
     if use_rolling_window is None:
         use_rolling_window = getattr(config, 'USE_ROLLING_WINDOW', False)
     if rolling_window_size is None:
