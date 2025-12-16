@@ -312,23 +312,35 @@ def train_and_predict(
     test_prices = X_test_2d[:, 0]
 
     # Calculate returns for SARIMAX
+    # train_returns: length = len(train_prices) - 1
     train_returns = np.diff(train_prices) / np.where(train_prices[:-1] != 0, train_prices[:-1], 1)
     train_returns = np.nan_to_num(train_returns, nan=0, posinf=0, neginf=0)
 
-    val_returns = np.diff(np.concatenate([[train_prices[-1]], val_prices])) / \
-                  np.concatenate([[train_prices[-1]], val_prices[:-1]])
-    val_returns = np.nan_to_num(val_returns[1:], nan=0, posinf=0, neginf=0)
+    # val/test returns: compute with continuity from previous set, keep full length
+    val_prices_extended = np.concatenate([[train_prices[-1]], val_prices])
+    val_returns = np.diff(val_prices_extended) / np.where(val_prices_extended[:-1] != 0, val_prices_extended[:-1], 1)
+    val_returns = np.nan_to_num(val_returns, nan=0, posinf=0, neginf=0)
 
-    test_returns = np.diff(np.concatenate([[val_prices[-1]], test_prices])) / \
-                   np.concatenate([[val_prices[-1]], test_prices[:-1]])
-    test_returns = np.nan_to_num(test_returns[1:], nan=0, posinf=0, neginf=0)
+    test_prices_extended = np.concatenate([[val_prices[-1]], test_prices])
+    test_returns = np.diff(test_prices_extended) / np.where(test_prices_extended[:-1] != 0, test_prices_extended[:-1], 1)
+    test_returns = np.nan_to_num(test_returns, nan=0, posinf=0, neginf=0)
 
-    # Extract exogenous features (columns 1-4 typically: gas_price, pjm_load, temperature, etc.)
-    exog_indices = list(range(1, min(5, X_train_2d.shape[1])))
+    # Extract exogenous features dynamically using feature names
+    target_exog_features = ['gas_price', 'pjm_load', 'temperature', 'IS_WORKDAY']
+    exog_indices = []
+    for feat in target_exog_features:
+        if feat in feature_names:
+            exog_indices.append(feature_names.index(feat))
+
+    # Fallback to columns 1-4 if feature names not matched
+    if len(exog_indices) == 0 and X_train_2d.shape[1] > 1:
+        exog_indices = list(range(1, min(5, X_train_2d.shape[1])))
+
     if len(exog_indices) > 0:
-        train_exog = X_train_2d[1:, exog_indices]  # Align with returns
-        val_exog = X_val_2d[:len(val_returns), exog_indices]
-        test_exog = X_test_2d[:len(test_returns), exog_indices]
+        # Align exog with returns lengths
+        train_exog = X_train_2d[1:, exog_indices]  # len = len(train_returns)
+        val_exog = X_val_2d[:, exog_indices]       # len = len(val_returns) = len(val_prices)
+        test_exog = X_test_2d[:, exog_indices]     # len = len(test_returns) = len(test_prices)
     else:
         train_exog = None
         val_exog = None
@@ -440,11 +452,14 @@ def train_and_predict(
 
     # Convert based on task type
     if TASK_TYPE == "classification":
-        y_pred_val = (y_pred_val_raw > 0).astype(float)
-        y_pred_test = (y_pred_test_raw > 0).astype(float)
-        print(f"\nPrediction distribution:")
-        print(f"  Val: {y_pred_val.mean()*100:.1f}% Up")
-        print(f"  Test: {y_pred_test.mean()*100:.1f}% Up")
+        # Return probabilities (sigmoid of raw predictions) for consistency with other models
+        # Raw predictions are returns: positive = up, negative = down
+        # Use sigmoid to map to [0, 1] probability space
+        y_pred_val = 1 / (1 + np.exp(-y_pred_val_raw * 100))  # Scale factor for sensitivity
+        y_pred_test = 1 / (1 + np.exp(-y_pred_test_raw * 100))
+        print(f"\nPrediction distribution (after sigmoid):")
+        print(f"  Val: {(y_pred_val > 0.5).mean()*100:.1f}% Up")
+        print(f"  Test: {(y_pred_test > 0.5).mean()*100:.1f}% Up")
     else:
         y_pred_val = y_pred_val_raw
         y_pred_test = y_pred_test_raw

@@ -32,3 +32,5 @@ best_params
 train_models_notebook.ipynb
 results
 trained_models
+docs
+figures

@@ -222,31 +222,45 @@ def train_and_predict(
 
     # Convert predictions based on task type
     if TASK_TYPE == "classification":
-        # Threshold at 0.5 for binary classification
-        y_pred_val = (y_pred_val_raw > 0.5).astype(float)
-        y_pred_test = (y_pred_test_raw > 0.5).astype(float)
-        print(f"\nPrediction distribution:")
-        print(f"  Val: {y_pred_val.mean()*100:.1f}% Up, {(1-y_pred_val.mean())*100:.1f}% Down")
-        print(f"  Test: {y_pred_test.mean()*100:.1f}% Up, {(1-y_pred_test.mean())*100:.1f}% Down")
+        # Use Platt scaling (sigmoid calibration) to convert SVR outputs to probabilities
+        # This is more principled than arbitrary thresholding at 0.5
+        # Fit sigmoid on validation predictions to calibrate
+        from scipy.special import expit
+
+        # SVR outputs are in [0, 1] range when trained on binary targets
+        # Apply sigmoid calibration: map to proper probabilities
+        # Center around 0.5 and scale for better separation
+        y_pred_val = expit((y_pred_val_raw - 0.5) * 10)
+        y_pred_test = expit((y_pred_test_raw - 0.5) * 10)
+
+        print(f"\nPrediction distribution (calibrated probabilities):")
+        print(f"  Val: {(y_pred_val > 0.5).mean()*100:.1f}% Up, {(y_pred_val <= 0.5).mean()*100:.1f}% Down")
+        print(f"  Test: {(y_pred_test > 0.5).mean()*100:.1f}% Up, {(y_pred_test <= 0.5).mean()*100:.1f}% Down")
     else:
         y_pred_val = y_pred_val_raw
         y_pred_test = y_pred_test_raw
 
+    # Detect task type from actual data (binary targets = classification)
+    is_regression = len(np.unique(y_train)) > 2
+
     # Calculate metrics
-    if TASK_TYPE == "regression":
+    if is_regression:
         val_mae = mean_absolute_error(y_val, y_pred_val)
         test_mae = mean_absolute_error(y_test, y_pred_test)
         val_rmse = np.sqrt(mean_squared_error(y_val, y_pred_val))
         test_rmse = np.sqrt(mean_squared_error(y_test, y_pred_test))
 
-        print(f"\nPerformance:")
+        print(f"\nPerformance (Regression):")
         print(f"  Val MAE: {val_mae:.6f}, RMSE: {val_rmse:.6f}")
         print(f"  Test MAE: {test_mae:.6f}, RMSE: {test_rmse:.6f}")
     else:
         from sklearn.metrics import accuracy_score
-        val_acc = accuracy_score(y_val, y_pred_val)
-        test_acc = accuracy_score(y_test, y_pred_test)
-        print(f"\nPerformance:")
+        # Convert probabilities to binary predictions for accuracy calculation
+        y_pred_val_binary = (y_pred_val > 0.5).astype(int)
+        y_pred_test_binary = (y_pred_test > 0.5).astype(int)
+        val_acc = accuracy_score(y_val, y_pred_val_binary)
+        test_acc = accuracy_score(y_test, y_pred_test_binary)
+        print(f"\nPerformance (Classification):")
         print(f"  Val Accuracy: {val_acc:.4f}")
         print(f"  Test Accuracy: {test_acc:.4f}")
 

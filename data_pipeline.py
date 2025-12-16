@@ -454,7 +454,11 @@ def make_dataset_for_task(
         # Adjust returns_test to align with sequences
         # After sequence creation, we lose the first seq_len samples
         returns_test = returns_test[seq_len:]
-        
+
+        # Validate shape alignment after sequence creation
+        assert len(y_test) == len(returns_test), \
+            f"Shape mismatch after sequence creation: y_test={len(y_test)}, returns_test={len(returns_test)}"
+
         print(f"Sequence shapes - Train: {X_train.shape}, Val: {X_val.shape}, Test: {X_test.shape}")
     else:
         print(f"Using tabular format (no sequences)")
@@ -508,7 +512,11 @@ def _validate_dataset(datasets: Dict[str, Any], is_torch: bool) -> None:
         "Val X and y have different lengths"
     assert datasets['X_test'].shape[0] == len(datasets['y_test']), \
         "Test X and y have different lengths"
-    
+
+    # Check returns_test alignment
+    assert datasets['X_test'].shape[0] == len(datasets['returns_test']), \
+        f"Test X and returns_test have different lengths: {datasets['X_test'].shape[0]} vs {len(datasets['returns_test'])}"
+
     # Check for NaN/Inf
     for key in ['X_train', 'X_val', 'X_test', 'y_train', 'y_val', 'y_test']:
         data = datasets[key]
@@ -518,7 +526,11 @@ def _validate_dataset(datasets: Dict[str, Any], is_torch: bool) -> None:
         else:
             assert not np.isnan(data).any(), f"{key} contains NaN"
             assert not np.isinf(data).any(), f"{key} contains Inf"
-    
+
+    # Validate returns_test
+    assert not np.isnan(datasets['returns_test']).any(), "returns_test contains NaN"
+    assert not np.isinf(datasets['returns_test']).any(), "returns_test contains Inf"
+
     print("[OK] Dataset validation passed!")
 
 

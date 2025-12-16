@@ -25,10 +25,7 @@ Standard Interface Contract:
 Available Models:
     - model_lstm: LSTM neural network for sequential data
     - model_gru: GRU neural network for sequential data
-    - model_narx: NARX neural network for sequential data with exogenous inputs
     - model_rf: Random Forest for tabular data
-    - model_arima: ARIMA for univariate time series forecasting
-    - model_elasticnet: Elastic Net (L1+L2 regularization) for tabular data
     - model_sarimax: Seasonal ARIMA with exogenous variables (natural gas, weather)
     - model_svr: Support Vector Regression with RBF kernel
     - model_lightgbm: LightGBM gradient boosting with Optuna tuning
@@ -64,22 +61,7 @@ except ImportError:
     pass
 
 try:
-    from . import model_narx
-except ImportError:
-    pass
-
-try:
     from . import model_rf
-except ImportError:
-    pass
-
-try:
-    from . import model_arima
-except ImportError:
-    pass
-
-try:
-    from . import model_elasticnet
 except ImportError:
     pass
 
@@ -102,10 +84,7 @@ except ImportError:
 __all__ = [
     "model_lstm",
     "model_gru",
-    "model_narx",
     "model_rf",
-    "model_arima",
-    "model_elasticnet",
     "model_sarimax",
     "model_svr",
     "model_lightgbm",

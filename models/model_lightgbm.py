@@ -273,11 +273,13 @@ def train_and_predict(
         X_val = X_val[:, -1, :]
         X_test = X_test[:, -1, :]
 
-    is_classification = TASK_TYPE == "classification"
+    # Detect task type from actual data (binary targets = classification)
+    is_classification = len(np.unique(y_train)) <= 2
+    task_type_detected = "classification" if is_classification else "regression"
 
     print("\nLightGBM Model:")
     print("-" * 80)
-    print(f"  Task type: {TASK_TYPE}")
+    print(f"  Task type: {task_type_detected}")
     print(f"  Training samples: {len(X_train)}")
     print(f"  Validation samples: {len(X_val)}")
     print(f"  Test samples: {len(X_test)}")
