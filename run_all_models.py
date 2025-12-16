@@ -148,9 +148,8 @@ if PYTORCH_AVAILABLE and model_rnn_attn is not None:
         "task_type": "price",
         "seq_len": config.SEQUENCE_LENGTH,
         "description": "SimpleRNN + Attention for price prediction",
-    },
-
-
+    }
+    
 # =============================================================================
 # Helper Functions
 # =============================================================================

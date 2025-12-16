@@ -22,6 +22,8 @@ import plotly.express as px
 from datetime import datetime, timedelta
 import pickle
 from pathlib import Path
+import os 
+import ast 
 
 # Backend imports
 from data_pipeline import make_dataset_for_task
@@ -535,6 +537,66 @@ def run_BOS_strategy_ui(data: pd.DataFrame):
 # =============================================================================
 # ML Model UI Functions
 # =============================================================================
+@st.cache_data
+def load_model_comparison_csv(path="model_comparison_results.csv") -> pd.DataFrame:
+    if not os.path.exists(path):
+        return pd.DataFrame()
+    return pd.read_csv(path)
+
+def get_best_config(df: pd.DataFrame, model_type: str, task_type: str):
+    """
+    Returns (best_config_dict, matching_row_series) or (None, None) if not found.
+    Expects CSV columns like: model_name, task_type, best_config
+    where best_config is a stringified dict.
+    """
+    if df is None or df.empty:
+        return None, None
+
+    # Map UI label -> key expected in model_name
+    key_map = {
+        "LSTM": "LSTM",
+        "GRU": "GRU",
+        "RF": "RF",
+        "RNN": "RNN",
+        "BiRNN": "BiRNN",
+        "RNNATTN": "RNNATTN",
+    }
+
+
+    key = key_map.get(model_type, model_type)
+
+    # Prefer exact matches like "LSTM_sign" or "GRU_price"
+    candidates = df[
+        (df["task_type"].astype(str).str.lower() == str(task_type).lower()) &
+        (df["model_name"].astype(str).str.contains(key, case=False, na=False))
+    ]
+
+    if candidates.empty:
+        return None, None
+
+    # If multiple rows match, take the best by a sensible metric:
+    # - for classification ("sign"): maximize Accuracy if present
+    # - for regression ("price"): minimize RMSE if present
+    if task_type == "sign" and "Accuracy" in candidates.columns:
+        row = candidates.sort_values("Accuracy", ascending=False).iloc[0]
+    elif task_type == "price" and "RMSE" in candidates.columns:
+        row = candidates.sort_values("RMSE", ascending=True).iloc[0]
+    else:
+        row = candidates.iloc[0]
+
+    best_config_raw = row.get("best_config", None)
+    if best_config_raw is None or (isinstance(best_config_raw, float) and pd.isna(best_config_raw)):
+        return None, row
+
+    try:
+        best_cfg = ast.literal_eval(best_config_raw) if isinstance(best_config_raw, str) else dict(best_config_raw)
+        if not isinstance(best_cfg, dict):
+            return None, row
+        return best_cfg, row
+    except Exception:
+        return None, row
+
+
 
 def run_ml_model_ui(data: pd.DataFrame):
     """
@@ -583,9 +645,30 @@ def run_ml_model_ui(data: pd.DataFrame):
     with col2:
         model_type = st.selectbox(
             "Model Type",
-            options=["LSTM", "GRU", "Random Forest"],
+            options=["LSTM", "GRU", "RF", "RNN", "BiRNN", "RNNATTN"]
             help="Select the model architecture"
         )
+
+    # Load once (must be outside the column scope so it's always available)
+    results_df = load_model_comparison_csv("model_comparison_results.csv")
+
+    use_best = st.checkbox(
+        "Use best tuned hyperparameters from model_comparison_results.csv",
+        value=True
+    )
+
+    best_cfg = None
+    best_row = None
+    if use_best:
+        best_cfg, best_row = get_best_config(results_df, model_type, task_type)
+        if best_cfg is None:
+            st.warning("Could not find a best_config match in model_comparison_results.csv. Falling back to UI defaults.")
+        else:
+            st.success(f"Loaded tuned config for {model_type} / {task_type} from results CSV.")
+            with st.expander("Loaded best_config"):
+                st.json(best_cfg)
+
+
     
     # Model parameters
     st.subheader("Model Parameters")
@@ -593,16 +676,26 @@ def run_ml_model_ui(data: pd.DataFrame):
     col1, col2, col3 = st.columns(3)
     
     with col1:
-        if model_type in ["LSTM", "GRU"]:
+        if model_type in ["RNN (Base)", "RNN (BiDirectional)", "RNN (Attention)", "LSTM", "GRU"]:
+            default_seq = config.SEQUENCE_LENGTH
+            if use_best and best_cfg and "seq_len" in best_cfg:
+                default_seq = int(best_cfg["seq_len"])
+
             seq_len = st.slider(
                 "Sequence Length",
-                7, 30, config.SEQUENCE_LENGTH,
+                7, 30, int(default_seq),
                 help="Number of past days to use for prediction"
             )
+
+            # If using best config, force seq_len to tuned value (so it can't drift)
+            if use_best and best_cfg and "seq_len" in best_cfg:
+                seq_len = int(best_cfg["seq_len"])
+                st.caption(f"Using tuned seq_len = {seq_len}")
         else:
             seq_len = None
             st.info("Random Forest uses tabular data (no sequences)")
-    
+
+        
     with col2:
         test_size = st.slider(
             "Test Split %",
@@ -618,7 +711,7 @@ def run_ml_model_ui(data: pd.DataFrame):
     # Run model button
     if st.button("Train and Evaluate Model", key="ml_run"):
         # Check if selected model requires PyTorch
-        if model_type in ["LSTM", "GRU"] and not PYTORCH_AVAILABLE:
+        if model_type in ["RNN", "BiRNN", "RNNATTN", "LSTM", "GRU"] and not PYTORCH_AVAILABLE:
             st.error(f"{model_type} model requires PyTorch, but PyTorch is not installed.")
             st.info("Please select Random Forest model, or install PyTorch: `pip install torch`")
             return
@@ -643,10 +736,17 @@ def run_ml_model_ui(data: pd.DataFrame):
                 from models.model_lstm import train_and_predict
             elif model_type == "GRU":
                 from models.model_gru import train_and_predict
-            else:  # Random Forest
+            elif model_type == "RF":
                 from models.model_rf import train_and_predict
+            elif model_type == "RNN":
+                from models.model_rnn import train_and_predict
+            elif model_type == "BiRNN":
+                from models.model_rnn_bidir import train_and_predict
+            else:  # "RNNATTN"
+                from models.model_rnn_attn import train_and_predict
+
             
-            results = train_and_predict(datasets, config=None)
+            results = train_and_predict(datasets, config=best_cfg if use_best else None)
             
             # Step 3: Evaluate
             st.write("Evaluating performance...")
