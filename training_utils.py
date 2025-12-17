@@ -24,6 +24,18 @@ from typing import Tuple, Literal, Dict, Any, Optional
 import config
 
 
+def safe_print(*args, **kwargs):
+    """
+    Safe print function that handles BrokenPipeError when stdout is redirected.
+    This is needed when running in Streamlit or other environments that redirect stdout.
+    """
+    try:
+        print(*args, **kwargs)
+    except BrokenPipeError:
+        # Ignore broken pipe errors (e.g., when stdout is redirected by Streamlit)
+        pass
+
+
 def set_global_seed(seed: int = 42) -> None:
     """
     Set global random seeds for reproducible experiments.
@@ -161,7 +173,7 @@ def standard_compile_and_train(
     if device is None:
         device = 'cuda' if torch.cuda.is_available() else 'cpu'
     if verbose >= 1:
-        print(f"Training on device: {device}")
+        safe_print(f"Training on device: {device}")
     model = model.to(device)
     
     # Convert to tensors
@@ -288,7 +300,7 @@ def standard_compile_and_train(
         history[f'val_{metric_name}'].append(val_metric)
         
         if verbose >= 1:
-            print(f"Epoch {epoch+1}/{max_epochs} - loss: {train_loss:.4f} - "
+            safe_print(f"Epoch {epoch+1}/{max_epochs} - loss: {train_loss:.4f} - "
                   f"{metric_name}: {train_metric:.4f} - val_loss: {val_loss:.4f} - "
                   f"val_{metric_name}: {val_metric:.4f}")
         
@@ -302,19 +314,19 @@ def standard_compile_and_train(
                 for key, value in model.state_dict().items()
             }
             if verbose >= 2:
-                print(f"  → New best model (val_loss: {val_loss:.4f}, improvement: {improvement:.6f})")
+                safe_print(f"  → New best model (val_loss: {val_loss:.4f}, improvement: {improvement:.6f})")
         else:
             patience_counter += 1
             if patience_counter >= patience:
                 if verbose >= 1:
-                    print(f"Early stopping at epoch {epoch+1}")
+                    safe_print(f"Early stopping at epoch {epoch+1}")
                 break
     
     # Restore best model
     if best_model_state is not None:
         model.load_state_dict(best_model_state)
         if verbose >= 1:
-            print(f"Best model restored (val_loss: {best_val_loss:.4f})")
+            safe_print(f"Best model restored (val_loss: {best_val_loss:.4f})")
         
         # Save best model if requested
         if save_best and save_path:
@@ -370,7 +382,7 @@ def save_model(
             save_dict['metadata'] = metadata
         
         torch.save(save_dict, filepath_with_ext)
-        print(f"Model saved to: {filepath_with_ext}")
+        safe_print(f"Model saved to: {filepath_with_ext}")
         
     elif save_format == "pkl":
         # Pickle format (saves entire model)
@@ -384,7 +396,7 @@ def save_model(
         
         with open(filepath_with_ext, 'wb') as f:
             pickle.dump(save_dict, f)
-        print(f"Model saved to: {filepath_with_ext}")
+        safe_print(f"Model saved to: {filepath_with_ext}")
     else:
         raise ValueError(f"Invalid save_format: {save_format}. Must be 'pth' or 'pkl'")
 
@@ -431,9 +443,9 @@ def load_model(
         model.eval()
         
         metadata = checkpoint.get('metadata', None)
-        print(f"Model loaded from: {filepath}")
+        safe_print(f"Model loaded from: {filepath}")
         if metadata:
-            print(f"Metadata: {metadata}")
+            safe_print(f"Metadata: {metadata}")
         
         return model, metadata
         
@@ -447,9 +459,9 @@ def load_model(
         model.eval()
         
         metadata = checkpoint.get('metadata', None)
-        print(f"Model loaded from: {filepath}")
+        safe_print(f"Model loaded from: {filepath}")
         if metadata:
-            print(f"Metadata: {metadata}")
+            safe_print(f"Metadata: {metadata}")
         
         return model, metadata
     else:

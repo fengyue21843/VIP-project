@@ -133,12 +133,39 @@ def evaluate_classification(
     # Confusion matrix
     cm = confusion_matrix(y_true, y_pred)
     
-    # Extract metrics
+    # Extract metrics - handle both string and integer class labels
+    # classification_report uses string keys like "0", "1" or integer keys
+    class_1_key = None
+    for key in ["1", 1, "1.0", 1.0]:
+        if str(key) in report:
+            class_1_key = str(key)
+            break
+    
+    if class_1_key and class_1_key in report:
+        class_metrics = report[class_1_key]
+        precision = class_metrics.get("precision", 0.0)
+        recall = class_metrics.get("recall", 0.0)
+        f1 = class_metrics.get("f1-score", 0.0)
+    else:
+        # Fallback: calculate manually from confusion matrix
+        # cm format: [[TN, FP], [FN, TP]]
+        if cm.shape == (2, 2):
+            tp = cm[1, 1]
+            fp = cm[0, 1]
+            fn = cm[1, 0]
+            precision = tp / (tp + fp) if (tp + fp) > 0 else 0.0
+            recall = tp / (tp + fn) if (tp + fn) > 0 else 0.0
+            f1 = 2 * (precision * recall) / (precision + recall) if (precision + recall) > 0 else 0.0
+        else:
+            precision = 0.0
+            recall = 0.0
+            f1 = 0.0
+    
     metrics = {
         "Accuracy": report["accuracy"],
-        "Precision": report.get("1", {}).get("precision", 0.0),
-        "Recall": report.get("1", {}).get("recall", 0.0),
-        "F1": report.get("1", {}).get("f1-score", 0.0),
+        "Precision": precision,
+        "Recall": recall,
+        "F1": f1,
         "Confusion_Matrix": cm.tolist(),
     }
     
