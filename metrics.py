@@ -404,12 +404,12 @@ def evaluate_model_outputs(
     
     Example:
         ```python
-        from data_pipeline import make_dataset_for_task
+        from data_pipeline_v2 import make_dataset_v2
         from models import model_lstm
         from metrics import evaluate_model_outputs
         
         # Get data and train model
-        datasets = make_dataset_for_task("sign", seq_len=14)
+        datasets = make_dataset_v2("sign", seq_len=14)
         results = model_lstm.train_and_predict(datasets)
         
         # Evaluate
