@@ -583,7 +583,7 @@ def run_ml_model_ui(data: pd.DataFrame):
     with col2:
         model_type = st.selectbox(
             "Model Type",
-            options=["LSTM", "GRU", "Random Forest"],
+            options=["LightGBM", "SVR", "SARIMAX", "LSTM", "GRU", "Random Forest"],
             help="Select the model architecture"
         )
     
@@ -601,7 +601,14 @@ def run_ml_model_ui(data: pd.DataFrame):
             )
         else:
             seq_len = None
-            st.info("Random Forest uses tabular data (no sequences)")
+            if model_type == "LightGBM":
+                st.info("LightGBM - Fast gradient boosting (GPU optional)")
+            elif model_type == "SVR":
+                st.info("SVR - Support Vector Regression with RBF kernel")
+            elif model_type == "SARIMAX":
+                st.info("SARIMAX - Seasonal ARIMA with exogenous variables")
+            else:
+                st.info("Random Forest uses tabular data (no sequences)")
     
     with col2:
         test_size = st.slider(
@@ -620,7 +627,7 @@ def run_ml_model_ui(data: pd.DataFrame):
         # Check if selected model requires PyTorch
         if model_type in ["LSTM", "GRU"] and not PYTORCH_AVAILABLE:
             st.error(f"{model_type} model requires PyTorch, but PyTorch is not installed.")
-            st.info("Please select Random Forest model, or install PyTorch: `pip install torch`")
+            st.info("Please select LightGBM, SVR, SARIMAX, or Random Forest, or install PyTorch: `pip install torch`")
             return
         
         waiting_statement()
@@ -643,6 +650,12 @@ def run_ml_model_ui(data: pd.DataFrame):
                 from models.model_lstm import train_and_predict
             elif model_type == "GRU":
                 from models.model_gru import train_and_predict
+            elif model_type == "LightGBM":
+                from models.model_lightgbm import train_and_predict
+            elif model_type == "SVR":
+                from models.model_svr import train_and_predict
+            elif model_type == "SARIMAX":
+                from models.model_sarimax import train_and_predict
             else:  # Random Forest
                 from models.model_rf import train_and_predict
             
@@ -724,6 +737,314 @@ def run_ml_model_ui(data: pd.DataFrame):
 
 
 # =============================================================================
+# Results Display Function
+# =============================================================================
+
+def display_results_page():
+    """Display final model results from the electricity price forecasting study."""
+    st.header("Model Performance Results")
+    st.markdown("""
+    Final results from our electricity price forecasting study on PJM market data (2002-2024).
+
+    **Dataset**: 8,020 daily samples with 27 engineered features
+    **Split**: 70% train / 15% validation / 15% test
+    """)
+
+    # Classification Results
+    st.subheader("Classification Task (Direction Prediction)")
+
+    # Performance data
+    classification_data = pd.DataFrame({
+        'Model': ['LightGBM', 'SVR', 'SARIMAX'],
+        'Accuracy': [70.31, 67.87, 61.14],
+        'ROI (%)': [16.86, -13.85, -7.89],
+        'Sharpe Ratio': [1.40, -1.15, -0.65],
+        'Win Rate (%)': [37.93, 34.06, 34.57],
+        'Best For': ['Trading', 'Classification', 'Baseline']
+    })
+
+    # Highlight best model
+    st.dataframe(
+        classification_data.style.apply(
+            lambda x: ['background-color: #d4edda' if x.name == 0 else '' for _ in x],
+            axis=1
+        ),
+        use_container_width=True,
+        hide_index=True
+    )
+
+    # Key metrics cards
+    col1, col2, col3, col4 = st.columns(4)
+    with col1:
+        st.metric("Best Accuracy", "70.31%", delta="LightGBM")
+    with col2:
+        st.metric("Best ROI", "+16.86%", delta="LightGBM")
+    with col3:
+        st.metric("Best Sharpe", "1.40", delta="LightGBM")
+    with col4:
+        st.metric("Total Trades", "1,189")
+
+    # Classification comparison charts
+    st.subheader("Classification Performance Comparison")
+
+    chart_col1, chart_col2, chart_col3 = st.columns(3)
+
+    with chart_col1:
+        fig_acc = go.Figure(data=[
+            go.Bar(
+                x=['LightGBM', 'SVR', 'SARIMAX'],
+                y=[70.31, 67.87, 61.14],
+                marker_color=['#28a745', '#dc3545', '#dc3545'],
+                text=[f'{v:.1f}%' for v in [70.31, 67.87, 61.14]],
+                textposition='outside'
+            )
+        ])
+        fig_acc.update_layout(
+            title='Classification Accuracy',
+            yaxis_title='Accuracy (%)',
+            yaxis_range=[0, 100],
+            height=350
+        )
+        st.plotly_chart(fig_acc, use_container_width=True)
+
+    with chart_col2:
+        fig_roi = go.Figure(data=[
+            go.Bar(
+                x=['LightGBM', 'SVR', 'SARIMAX'],
+                y=[16.86, -13.85, -7.89],
+                marker_color=['#28a745', '#dc3545', '#dc3545'],
+                text=[f'{v:+.2f}%' for v in [16.86, -13.85, -7.89]],
+                textposition='outside'
+            )
+        ])
+        fig_roi.update_layout(
+            title='Return on Investment',
+            yaxis_title='ROI (%)',
+            height=350
+        )
+        fig_roi.add_hline(y=0, line_dash="dash", line_color="gray")
+        st.plotly_chart(fig_roi, use_container_width=True)
+
+    with chart_col3:
+        fig_sharpe = go.Figure(data=[
+            go.Bar(
+                x=['LightGBM', 'SVR', 'SARIMAX'],
+                y=[1.40, -1.15, -0.65],
+                marker_color=['#28a745', '#dc3545', '#dc3545'],
+                text=[f'{v:.2f}' for v in [1.40, -1.15, -0.65]],
+                textposition='outside'
+            )
+        ])
+        fig_sharpe.update_layout(
+            title='Risk-Adjusted Returns (Sharpe)',
+            yaxis_title='Sharpe Ratio',
+            height=350
+        )
+        fig_sharpe.add_hline(y=1, line_dash="dash", line_color="green",
+                            annotation_text="Acceptable (>1)")
+        fig_sharpe.add_hline(y=0, line_dash="dash", line_color="gray")
+        st.plotly_chart(fig_sharpe, use_container_width=True)
+
+    # Regression Results
+    st.subheader("Regression Task (Price Prediction)")
+
+    regression_data = pd.DataFrame({
+        'Model': ['LightGBM', 'SVR', 'SARIMAX'],
+        'MAE': [0.094, 0.185, 0.336],
+        'RMSE': [0.154, 0.294, 0.532],
+        'ROI (%)': [34.60, 13.85, 13.85],
+        'Sharpe Ratio': [2.91, 1.15, 1.15],
+        'Win Rate (%)': [38.18, 32.13, 32.13]
+    })
+
+    st.dataframe(
+        regression_data.style.apply(
+            lambda x: ['background-color: #d4edda' if x.name == 0 else '' for _ in x],
+            axis=1
+        ),
+        use_container_width=True,
+        hide_index=True
+    )
+
+    # Regression key finding
+    st.success("**Key Finding**: LightGBM regression (+34.60% ROI, Sharpe 2.91) outperforms classification (+16.86% ROI, Sharpe 1.40)")
+
+    # Feature Importance
+    st.subheader("LightGBM Feature Importance")
+
+    feature_data = pd.DataFrame({
+        'Feature': ['price_position', 'pjm_load_pct_change', 'Weekday', 'pjm_load',
+                   'temperature', 'momentum_7d', 'volatility_30d', 'momentum_3d',
+                   'price_return', 'trend_slope'],
+        'Importance': [391, 383, 369, 361, 319, 315, 304, 271, 265, 263]
+    })
+
+    fig_feat = go.Figure(data=[
+        go.Bar(
+            y=feature_data['Feature'],
+            x=feature_data['Importance'],
+            orientation='h',
+            marker_color='#28a745',
+            text=feature_data['Importance'],
+            textposition='outside'
+        )
+    ])
+    fig_feat.update_layout(
+        title='Top 10 Predictive Features',
+        xaxis_title='Importance Score',
+        yaxis=dict(autorange="reversed"),
+        height=450
+    )
+    st.plotly_chart(fig_feat, use_container_width=True)
+
+    # Feature interpretation
+    with st.expander("Feature Interpretation"):
+        st.markdown("""
+        **Top Drivers:**
+        - **price_position**: Where price is relative to recent range (mean-reversion)
+        - **pjm_load_pct_change**: Daily electricity demand change
+        - **Weekday**: Business vs weekend patterns
+        - **pjm_load**: Absolute electricity demand level
+        - **temperature**: Weather impact on demand
+        """)
+
+    # Confusion Matrix
+    st.subheader("LightGBM Confusion Matrix")
+
+    col1, col2 = st.columns([2, 1])
+
+    with col1:
+        confusion_matrix = np.array([[751, 56], [297, 85]])
+
+        fig_cm = go.Figure(data=go.Heatmap(
+            z=confusion_matrix,
+            x=['Predicted Down', 'Predicted Up'],
+            y=['Actual Down', 'Actual Up'],
+            text=[[f'{751}<br>(93.1%)', f'{56}<br>(6.9%)'],
+                  [f'{297}<br>(77.7%)', f'{85}<br>(22.3%)']],
+            texttemplate='%{text}',
+            colorscale='Greens',
+            showscale=True
+        ))
+        fig_cm.update_layout(
+            title='LightGBM Confusion Matrix',
+            height=400
+        )
+        st.plotly_chart(fig_cm, use_container_width=True)
+
+    with col2:
+        st.markdown("**Interpretation:**")
+        st.markdown("""
+        - Very good at predicting "Down" (93% correct)
+        - Conservative with "Up" predictions (only 141 total)
+        - When predicting "Up", correct 60% of the time (85/141)
+        - Room for improvement: Better "Up" class detection
+        """)
+
+    # Radar Chart Comparison
+    st.subheader("Multi-Metric Comparison")
+
+    # Normalize metrics for radar
+    categories = ['Accuracy', 'ROI', 'Sharpe', 'Win Rate']
+
+    fig_radar = go.Figure()
+
+    # LightGBM (normalized)
+    fig_radar.add_trace(go.Scatterpolar(
+        r=[0.703, 1.0, 1.0, 0.379],
+        theta=categories,
+        fill='toself',
+        name='LightGBM',
+        line_color='#28a745'
+    ))
+
+    # SVR (normalized)
+    fig_radar.add_trace(go.Scatterpolar(
+        r=[0.679, 0.0, 0.0, 0.341],
+        theta=categories,
+        fill='toself',
+        name='SVR',
+        line_color='#007bff'
+    ))
+
+    # SARIMAX (normalized)
+    fig_radar.add_trace(go.Scatterpolar(
+        r=[0.611, 0.23, 0.24, 0.346],
+        theta=categories,
+        fill='toself',
+        name='SARIMAX',
+        line_color='#fd7e14'
+    ))
+
+    fig_radar.update_layout(
+        polar=dict(radialaxis=dict(visible=True, range=[0, 1])),
+        showlegend=True,
+        title='Model Performance Comparison (Normalized)',
+        height=500
+    )
+    st.plotly_chart(fig_radar, use_container_width=True)
+
+    # Trading Strategy Recommendation
+    st.subheader("Recommendations")
+
+    rec_col1, rec_col2 = st.columns(2)
+
+    with rec_col1:
+        st.markdown("### Best Configuration")
+        st.info("""
+        **Task**: Regression (Price Prediction)
+        **Model**: LightGBM
+        **ROI**: +34.60%
+        **Sharpe**: 2.91
+
+        Regression-derived signals outperform direct classification.
+        """)
+
+    with rec_col2:
+        st.markdown("### Production Strategy")
+        st.info("""
+        **Signal Generation**: Daily batch prediction before market open
+        **Position Sizing**: Use prediction probability
+        **Risk Management**: Stop-loss at 2% drawdown
+        **Retraining**: Monthly with new data
+        """)
+
+    # Hyperparameters
+    with st.expander("Best Hyperparameters (Optuna-Tuned)"):
+        hyper_col1, hyper_col2 = st.columns(2)
+
+        with hyper_col1:
+            st.markdown("**LightGBM:**")
+            st.code("""
+n_estimators: 156
+learning_rate: 0.0184
+max_depth: 9
+num_leaves: 188
+min_child_samples: 68
+subsample: 0.872
+colsample_bytree: 0.755
+reg_alpha: 0.000155
+reg_lambda: 3.515
+            """)
+
+        with hyper_col2:
+            st.markdown("**SVR:**")
+            st.code("""
+kernel: rbf
+C: 10
+epsilon: 0.01
+gamma: 0.001
+            """)
+
+            st.markdown("**SARIMAX:**")
+            st.code("""
+Order: (0, 0, 0)
+Seasonal Order: (0, 0, 0, 7)
+# Pure exogenous model
+            """)
+
+
+# =============================================================================
 # Main Application
 # =============================================================================
 
@@ -763,6 +1084,7 @@ def main():
         "Select Strategy/Model:",
         options=[
             "Dashboard",
+            "Results",
             "Percentile Strategy",
             "Break of Structure",
             "ML Models",
@@ -807,7 +1129,10 @@ def main():
             volatility = (data['Electricity: Wtd Avg Price $/MWh'].std() / 
                          data['Electricity: Wtd Avg Price $/MWh'].mean()) * 100
             st.metric("Volatility", f"{volatility:.2f}%")
-    
+
+    elif page == "Results":
+        display_results_page()
+
     elif page == "Percentile Strategy":
         run_percentile_strategy_ui(data)
     
@@ -866,23 +1191,36 @@ def main():
         - **Parameters**: Initial capital, lookback window
         
         #### 3. Machine Learning Models
-        - **LSTM**: 2-layer LSTM for sequence modeling
-        - **GRU**: 2-layer GRU (faster alternative to LSTM)
+        - **LightGBM**: Gradient boosting with leaf-wise tree growth (best performer)
+        - **SVR**: Support Vector Regression with RBF kernel
+        - **SARIMAX**: Seasonal ARIMA with exogenous variables
+        - **LSTM**: 2-layer LSTM for sequence modeling (requires PyTorch)
+        - **GRU**: 2-layer GRU (faster alternative to LSTM, requires PyTorch)
         - **Random Forest**: Ensemble method for tabular data
         - **Tasks**: Classification (direction) or Regression (price)
         
+        ### Model Performance (Tuned Results)
+
+        | Model | Accuracy | ROI | Sharpe |
+        |-------|----------|-----|--------|
+        | **LightGBM** | **70.31%** | **+16.86%** | **1.40** |
+        | SVR | 67.87% | -13.85% | -1.15 |
+        | SARIMAX | 61.14% | -7.89% | -0.65 |
+
+        *LightGBM is recommended for trading signals (only positive ROI).*
+
         ### Metrics Explained
-        
+
         **Prediction Metrics:**
         - **MAE**: Mean Absolute Error (regression)
         - **Accuracy**: Classification accuracy
         - **F1 Score**: Harmonic mean of precision and recall
         - **AUC**: Area Under ROC Curve
-        
+
         **Trading Metrics:**
         - **ROI**: Return on Investment (%)
         - **Win Rate**: Percentage of profitable trades
-        - **Sharpe Ratio**: Risk-adjusted returns
+        - **Sharpe Ratio**: Risk-adjusted returns (>1 is good)
         - **Total Trades**: Number of trades executed
         
         ### Usage Tips

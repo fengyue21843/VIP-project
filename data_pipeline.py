@@ -85,12 +85,24 @@ def load_dataset() -> pd.DataFrame:
     # Sort by Trade Date (keep it as a column, not as index)
     if 'Trade Date' in df.columns:
         df = df.sort_values('Trade Date')
-    
-    # Interpolate missing values (pandas 2.0+ compatibility)
-    df = df.ffill().bfill()
-    
-    # Handle zero electricity prices - replace with mean of non-zero values
+
+    # Track which rows have REAL price observations BEFORE imputation
+    # This allows us to filter to only real data for classification later
     price_col = 'Electricity: Wtd Avg Price $/MWh'
+    if price_col in df.columns:
+        # Real price = not null AND not zero (zero is also treated as missing)
+        df['has_real_price'] = df[price_col].notna() & (df[price_col] > 0)
+        n_real = df['has_real_price'].sum()
+        n_total = len(df)
+        print(f"Real price observations: {n_real}/{n_total} ({100*n_real/n_total:.1f}%)")
+    else:
+        df['has_real_price'] = True  # Default to all real if no price column
+
+    # Interpolate missing values (pandas 2.0+ compatibility)
+    # Keep imputed data for feature engineering (rolling calculations need continuity)
+    df = df.ffill().bfill()
+
+    # Handle zero electricity prices - replace with mean of non-zero values
     if price_col in df.columns:
         non_zero_prices = df[price_col][df[price_col] > 0]
         if len(non_zero_prices) > 0:
@@ -143,12 +155,18 @@ def build_feature_frame(df_raw: pd.DataFrame) -> pd.DataFrame:
     
     # Create feature dataframe with core features
     df_features = pd.DataFrame(index=df_feat.index)
-    
+
     for old_col, new_col in core_columns.items():
         if old_col in df_feat.columns:
             df_features[new_col] = df_feat[old_col]
         else:
             raise KeyError(f"Required column '{old_col}' not found in dataset")
+
+    # Preserve the has_real_price flag from load_dataset()
+    if 'has_real_price' in df_feat.columns:
+        df_features['has_real_price'] = df_feat['has_real_price']
+    else:
+        df_features['has_real_price'] = True  # Default if not present
     
     # 2. Time features
     df_features['Day'] = df_features.index.day
@@ -359,27 +377,52 @@ def make_dataset_for_task(
     print("Building features...")
     df_feat = build_feature_frame(df_raw)
     
-    # Step 3: Build targets
-    print(f"Building targets for task: {task_type}...")
-    y = build_targets(df_feat, task_type)
-    
-    # Create a temporary dataframe to align features and targets
+    # Filter to only REAL price observations FIRST (before computing targets)
+    # This ensures returns are computed between consecutive real trading days
     df_feat_copy = df_feat.copy()
-    df_feat_copy['Return_t+1'] = df_feat['price'].pct_change().shift(-1)
+    if 'has_real_price' in df_feat_copy.columns:
+        n_before = len(df_feat_copy)
+        df_feat_copy = df_feat_copy[df_feat_copy['has_real_price'] == True]
+        n_after = len(df_feat_copy)
+        print(f"Filtered to real observations: {n_after}/{n_before} ({100*n_after/n_before:.1f}%)")
+
+    # Step 3: Build targets on FILTERED data (returns between real observations only)
+    print(f"Building targets for task: {task_type}...")
+    # Compute return between consecutive real observations
+    price = df_feat_copy['price']
+    return_t = price.pct_change()
+    return_t_plus_1 = return_t.shift(-1)
+
+    # Build target based on task type
+    if task_type == "price":
+        y = return_t_plus_1.values
+    elif task_type == "sign":
+        y = (return_t_plus_1 > 0).astype(np.float32).values
+    else:
+        raise ValueError(f"Invalid task_type: {task_type}. Must be 'sign' or 'price'")
+
+    df_feat_copy['Return_t+1'] = return_t_plus_1
     df_feat_copy['y_target'] = y
-    
+
     # Drop rows with NaN in target (last row will have NaN from shift(-1))
     df_feat_copy = df_feat_copy.dropna(subset=['y_target', 'Return_t+1'])
-    
+
+    # Report class balance after filtering
+    if task_type == "sign":
+        class_counts = df_feat_copy['y_target'].value_counts().sort_index()
+        total = class_counts.sum()
+        print(f"Class distribution: Down={class_counts.get(0.0, 0)} ({100*class_counts.get(0.0, 0)/total:.1f}%), "
+              f"Up={class_counts.get(1.0, 0)} ({100*class_counts.get(1.0, 0)/total:.1f}%)")
+
     # Extract features and targets
-    # Exclude the target columns and the original price (to avoid leakage)
-    feature_cols = [col for col in df_feat_copy.columns 
-                    if col not in ['y_target', 'Return_t+1']]
-    
+    # Exclude the target columns, has_real_price flag, and original price (to avoid leakage)
+    feature_cols = [col for col in df_feat_copy.columns
+                    if col not in ['y_target', 'Return_t+1', 'has_real_price']]
+
     X = df_feat_copy[feature_cols].values
     y = df_feat_copy['y_target'].values
     returns_all = df_feat_copy['Return_t+1'].values
-    
+
     feature_names = feature_cols
     
     # Step 4: Time-based train/val/test split

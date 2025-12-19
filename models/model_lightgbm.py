@@ -175,7 +175,7 @@ def train_lightgbm(
     y_val: np.ndarray,
     config: dict = None,
     is_classification: bool = False,
-) -> Tuple[lgb.LGBMModel, Dict[str, Any]]:
+) -> Tuple[Any, Dict[str, Any]]:  # Returns (LGBMModel, best_params)
     """
     Train LightGBM model with optional hyperparameter tuning.
 
