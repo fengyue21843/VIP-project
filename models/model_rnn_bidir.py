@@ -16,6 +16,10 @@ from typing import Dict, Any
 # Import global configuration
 import config
 from training_utils import set_global_seed, standard_compile_and_train
+from sklearn.metrics import (
+    accuracy_score, precision_score, recall_score, f1_score,
+    roc_auc_score, confusion_matrix, classification_report
+)
 
 # Set random seeds for reproducibility
 set_global_seed(config.RANDOM_SEED)
@@ -91,6 +95,28 @@ def build_model(input_shape: tuple, config_dict: dict | None = None) -> nn.Modul
     _, n_features = input_shape
     return BiRNNModel(n_features, config_dict)
 
+def classification_metrics(y_true, y_prob, threshold=0.5):
+    y_true = np.array(y_true).reshape(-1).astype(int)
+    y_prob = np.array(y_prob).reshape(-1)
+
+    y_hat = (y_prob >= threshold).astype(int)
+
+    out = {
+        "threshold": float(threshold),
+        "accuracy": float(accuracy_score(y_true, y_hat)),
+        "precision": float(precision_score(y_true, y_hat, zero_division=0)),
+        "recall": float(recall_score(y_true, y_hat, zero_division=0)),
+        "f1": float(f1_score(y_true, y_hat, zero_division=0)),
+        "confusion_matrix": confusion_matrix(y_true, y_hat).tolist(),
+        "classification_report": classification_report(y_true, y_hat, zero_division=0),
+    }
+
+    if len(np.unique(y_true)) == 2:
+        out["roc_auc"] = float(roc_auc_score(y_true, y_prob))
+    else:
+        out["roc_auc"] = None
+
+    return out
 
 
 def train_and_predict(
@@ -142,7 +168,14 @@ def train_and_predict(
     print(f"  y_train: {y_train.shape}")
     print(f"  X_val: {X_val.shape}")
     print(f"  X_test: {X_test.shape}")
-    
+
+        # Hard guards (fail early)
+    if X_train is None or len(X_train) == 0:
+        raise ValueError("X_train is empty. Drop-null + sequencing likely removed too much data.")
+    if np.isnan(np.array(X_train)).any():
+        raise ValueError("X_train contains NaNs. The pipeline must drop/fill NaNs before sequencing.")
+
+        
     # Verify data is 3D for sequence models
     assert len(X_train.shape) == 3, (
         f"Expected 3D data (samples, timesteps, features), "
@@ -169,7 +202,14 @@ def train_and_predict(
     print(f"  Batch size: {config.BATCH_SIZE}")
     print(f"  Learning rate: {config.LEARNING_RATE}")
     
-    task_type = config.TASK_TYPE
+    # Prefer explicit task_name in datasets; otherwise fall back to global config
+    task_name = datasets.get("task_name", None)
+    if task_name == "sign":
+        task_type = "classification"
+    elif task_name == "price":
+        task_type = "regression"
+    else:
+        task_type = config.TASK_TYPE
     model, history = standard_compile_and_train(
         model,
         X_train, y_train,
@@ -217,20 +257,52 @@ def train_and_predict(
         # For regression: use raw predictions
         y_pred_val = y_pred_val_raw
         y_pred_test = y_pred_test_raw
-    
-    print(f"  Validation predictions: {y_pred_val.shape}")
-    print(f"  Test predictions: {y_pred_test.shape}")
-    
-    # ========================================================================
-    # Step 5: Return results in standard format
-    # ========================================================================
-    
-    return {
-        'y_pred_test': y_pred_test,   # REQUIRED: Test predictions
-        'y_pred_val': y_pred_val,     # Recommended: Validation predictions
-        'model': model,               # Recommended: Trained model
-        'history': history            # Optional: Training history
-    }
+    metrics_val = None
+    metrics_test = None
+
+    if task_type == "classification":
+        y_val_true = np.array(y_val).reshape(-1).astype(int)
+        y_test_true = np.array(datasets["y_test"]).reshape(-1).astype(int)
+
+        def _bal(name, yarr):
+            yarr = np.array(yarr).reshape(-1).astype(int)
+            n0 = int((yarr == 0).sum())
+            n1 = int((yarr == 1).sum())
+            total = len(yarr)
+            print(f"[DEBUG] {name} label balance: n0={n0} ({n0/total:.3f}), n1={n1} ({n1/total:.3f})")
+
+        _bal("VAL", y_val_true)
+        _bal("TEST", y_test_true)
+
+        metrics_val = classification_metrics(y_val_true, y_pred_val, threshold=0.5)
+        metrics_test = classification_metrics(y_test_true, y_pred_test, threshold=0.5)
+
+        print("\n[VAL METRICS]")
+        print(metrics_val["classification_report"])
+        print("Confusion matrix:", metrics_val["confusion_matrix"])
+        print("ROC AUC:", metrics_val["roc_auc"])
+
+        print("\n[TEST METRICS]")
+        print(metrics_test["classification_report"])
+        print("Confusion matrix:", metrics_test["confusion_matrix"])
+        print("ROC AUC:", metrics_test["roc_auc"])
+
+
+        print(f"  Validation predictions: {y_pred_val.shape}")
+        print(f"  Test predictions: {y_pred_test.shape}")
+        
+        # ========================================================================
+        # Step 5: Return results in standard format
+        # ========================================================================
+        return {
+            "y_pred_test": y_pred_test,
+            "y_pred_val": y_pred_val,
+            "model": model,
+            "history": history,
+            "metrics_val": metrics_val,
+            "metrics_test": metrics_test,
+        }
+
 
 
 # ============================================================================
@@ -249,7 +321,7 @@ if __name__ == "__main__":
     from data_pipeline import make_dataset_for_task
 
     # Toggle tuning here
-    USE_OPTUNA = True          # <- set False for a single normal run
+    USE_OPTUNA = False        # <- set False for a single normal run
     N_TRIALS = 15              # <- start small, increase later
     SEED = config.RANDOM_SEED  # use your global seed for reproducibility
 
@@ -272,6 +344,8 @@ if __name__ == "__main__":
         val_size=config.VAL_SIZE,
         scaler_type=config.SCALER_TYPE
     )
+    datasets["task_name"] = task_name
+
 
     # ------------------------------------------------------------------
     # [2/3] Training model... (with optional Optuna)

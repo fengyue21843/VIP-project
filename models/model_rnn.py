@@ -17,6 +17,11 @@ from typing import Dict, Any
 import config
 from training_utils import set_global_seed, standard_compile_and_train
 
+from sklearn.metrics import (
+    accuracy_score, precision_score, recall_score, f1_score,
+    roc_auc_score, confusion_matrix, classification_report
+)
+
 # Set random seeds for reproducibility
 set_global_seed(config.RANDOM_SEED)
 
@@ -81,6 +86,32 @@ def build_model(input_shape: tuple, config_dict: dict | None = None) -> nn.Modul
     model = SimpleRNNModel(n_features, config_dict)
     return model
 
+def classification_metrics(y_true, y_prob, threshold=0.5):
+    """
+    y_true: array-like of {0,1}
+    y_prob: array-like of probabilities in [0,1]
+    """
+    y_true = np.array(y_true).reshape(-1)
+    y_prob = np.array(y_prob).reshape(-1)
+    y_hat = (y_prob >= threshold).astype(int)
+
+    metrics = {
+        "threshold": float(threshold),
+        "accuracy": float(accuracy_score(y_true, y_hat)),
+        "precision": float(precision_score(y_true, y_hat, zero_division=0)),
+        "recall": float(recall_score(y_true, y_hat, zero_division=0)),
+        "f1": float(f1_score(y_true, y_hat, zero_division=0)),
+        "confusion_matrix": confusion_matrix(y_true, y_hat).tolist(),
+        "classification_report": classification_report(y_true, y_hat, zero_division=0),
+    }
+
+    # ROC AUC only valid if both classes exist
+    if len(np.unique(y_true)) == 2:
+        metrics["roc_auc"] = float(roc_auc_score(y_true, y_prob))
+    else:
+        metrics["roc_auc"] = None
+
+    return metrics
 
 
 def train_and_predict(
@@ -207,20 +238,58 @@ def train_and_predict(
         # For regression: use raw predictions
         y_pred_val = y_pred_val_raw
         y_pred_test = y_pred_test_raw
-    
-    print(f"  Validation predictions: {y_pred_val.shape}")
-    print(f"  Test predictions: {y_pred_test.shape}")
-    
-    # ========================================================================
-    # Step 5: Return results in standard format
-    # ========================================================================
-    
+        
+        # ============================
+    # NEW: Classification metrics
+    # ============================
+    metrics_val = None
+    metrics_test = None
+
+    if task_type == "classification":
+        # y_val may be shape (N,1) tensor or numpy; flatten to 1D ints
+        y_val_true = np.array(y_val).reshape(-1).astype(int)
+        y_test_true = np.array(datasets["y_test"]).reshape(-1).astype(int)
+
+        # Balance prints (labels)
+        def _bal(name, yarr):
+            yarr = np.array(yarr).reshape(-1).astype(int)
+            n0 = int((yarr == 0).sum())
+            n1 = int((yarr == 1).sum())
+            total = len(yarr)
+            print(f"[DEBUG] {name} label balance: n0={n0} ({n0/total:.3f}), n1={n1} ({n1/total:.3f})")
+
+        _bal("VAL", y_val_true)
+        _bal("TEST", y_test_true)
+
+        metrics_val = classification_metrics(y_val_true, y_pred_val, threshold=0.5)
+        metrics_test = classification_metrics(y_test_true, y_pred_test, threshold=0.5)
+
+        print("\n[VAL METRICS]")
+        print(metrics_val["classification_report"])
+        print("Confusion matrix:", metrics_val["confusion_matrix"])
+        print("ROC AUC:", metrics_val["roc_auc"])
+
+        print("\n[TEST METRICS]")
+        print(metrics_test["classification_report"])
+        print("Confusion matrix:", metrics_test["confusion_matrix"])
+        print("ROC AUC:", metrics_test["roc_auc"])
+
+        print(f"  Validation predictions: {y_pred_val.shape}")
+        print(f"  Test predictions: {y_pred_test.shape}")
+        
+        # ========================================================================
+        # Step 5: Return results in standard format
+        # ========================================================================
+        
     return {
-        'y_pred_test': y_pred_test,   # REQUIRED: Test predictions
-        'y_pred_val': y_pred_val,     # Recommended: Validation predictions
-        'model': model,               # Recommended: Trained model
-        'history': history            # Optional: Training history
+        "y_pred_test": y_pred_test,
+        "y_pred_val": y_pred_val,
+        "model": model,
+        "history": history,
+        "metrics_val": metrics_val,
+        "metrics_test": metrics_test,
     }
+
 
 
 # ============================================================================
@@ -239,7 +308,7 @@ if __name__ == "__main__":
     from data_pipeline import make_dataset_for_task
 
     # Toggle tuning here
-    USE_OPTUNA = True          # <- set False for a single normal run
+    USE_OPTUNA = False          # <- set False for a single normal run
     N_TRIALS = 15              # <- start small, increase later
     SEED = config.RANDOM_SEED  # use your global seed for reproducibility
 
@@ -256,7 +325,7 @@ if __name__ == "__main__":
     # ------------------------------------------------------------------
     print("\n[1/3] Loading data...")
     datasets = make_dataset_for_task(
-        task_type=task_name,
+        task_type="sign",
         seq_len=config.SEQUENCE_LENGTH,
         test_size=config.TEST_SIZE,
         val_size=config.VAL_SIZE,

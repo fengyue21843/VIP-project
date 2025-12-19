@@ -368,16 +368,32 @@ def make_dataset_for_task(
     
     # Create a temporary dataframe to align features and targets
     df_feat_copy = df_feat.copy()
-    df_feat_copy['Return_t+1'] = df_feat['price'].pct_change().shift(-1)
-    df_feat_copy['y_target'] = y
-    
-    # Drop rows with NaN in target (last row will have NaN from shift(-1))
-    df_feat_copy = df_feat_copy.dropna(subset=['y_target', 'Return_t+1'])
+    df_feat_copy["Return_t+1"] = df_feat["price"].pct_change(fill_method=None).shift(-1)
+    df_feat_copy["y_target"] = y
+
+    # Drop rows where the target/return is missing (e.g., last row from shift(-1))
+    df_feat_copy = df_feat_copy.dropna(subset=["y_target", "Return_t+1"])
+
+    # ------------------------------------------------------------
+    # NEW: For binary sign classification, ignore "flat" returns
+    # (otherwise they all become class 0 and blow up imbalance)
+    # ------------------------------------------------------------
+    if task_type == "sign":
+        eps = 1e-6  # tune if needed (e.g., 1e-5 or 1e-4)
+        df_feat_copy = df_feat_copy[df_feat_copy["Return_t+1"].abs() > eps].copy()
+
+    if task_type == "sign":
+        frac_pos = df_feat_copy["y_target"].mean()
+        print(f"[DEBUG] After flat-filter: rows={len(df_feat_copy)}, pos_rate={frac_pos:.3f}")
+
     
     # Extract features and targets
     # Exclude the target columns and the original price (to avoid leakage)
-    feature_cols = [col for col in df_feat_copy.columns 
-                    if col not in ['y_target', 'Return_t+1']]
+    feature_cols = [
+        col for col in df_feat_copy.columns
+        if col not in ["y_target", "Return_t+1", "price"]
+    ]
+
     
     X = df_feat_copy[feature_cols].values
     y = df_feat_copy['y_target'].values
