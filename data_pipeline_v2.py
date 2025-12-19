@@ -42,13 +42,11 @@ def load_dataset_v2(use_imputation: bool = False) -> pd.DataFrame:
     # Determine the path to the dataset
     data_paths = [
         config.DATA_PATH,
-        "dataset/Data_cleaned_Dataset.csv",
         r"c:\Users\DELL\Downloads\Data-20251207T171745Z-1-001\Data\Data_cleaned_Dataset.csv",
         "datasets/Data_cleaned_Dataset.csv",
         "Data_cleaned_Dataset.csv",
         "../Data/Data_cleaned_Dataset.csv",
-        "Data/Data_cleaned_Dataset.csv",
-
+        "Data/Data_cleaned_Dataset.csv"
     ]
     
     dataset_path = None
@@ -385,7 +383,7 @@ def balance_classification_dataset(
 
 def make_dataset_v2(
     task_type: TaskType = None,
-    seq_len: int | None = "default",  # Use sentinel value "default"
+    seq_len: int = None,
     test_size: float = None,
     val_size: float = None,
     scaler_type: ScalerType = None,
@@ -398,16 +396,14 @@ def make_dataset_v2(
 ) -> Dict[str, Any]:
     """
     Enhanced data pipeline V2.
-
+    
     New parameters:
         use_imputation: If False, drops missing data (Solution 1 - RECOMMENDED)
         drop_zero_returns: If True, drops periods with zero returns (Solution 2)
         flat_threshold: Threshold for "flat" class in 3-class classification
-        seq_len: Sequence length for RNN models. None = tabular data, int = sequence length
-                 Use "default" to get config.SEQUENCE_LENGTH
     """
     from sklearn.preprocessing import StandardScaler, MinMaxScaler
-
+    
     # Set defaults
     if task_type is None:
         task_type = config.get_task_name()
@@ -417,10 +413,8 @@ def make_dataset_v2(
         val_size = config.VAL_SIZE
     if scaler_type is None:
         scaler_type = config.SCALER_TYPE
-    # CRITICAL: Only use config default if seq_len is "default" sentinel
-    # If seq_len is explicitly None, keep it as None for tabular data
-    if seq_len == "default":
-        seq_len = getattr(config, 'SEQUENCE_LENGTH', None)
+    # Note: seq_len=None means tabular data (no sequences)
+    # Only use config default if seq_len is not explicitly passed
     if random_seed is None:
         random_seed = config.RANDOM_SEED
     

@@ -26,6 +26,9 @@ Available Models:
     - model_lstm: LSTM neural network for sequential data
     - model_gru: GRU neural network for sequential data
     - model_rf: Random Forest for tabular data
+    - model_sarimax: Seasonal ARIMA with exogenous variables (natural gas, weather)
+    - model_svr: Support Vector Regression with RBF kernel
+    - model_lightgbm: LightGBM gradient boosting with Optuna tuning
 
 Example Usage:
     ```python
@@ -62,5 +65,27 @@ try:
 except ImportError:
     pass
 
+try:
+    from . import model_sarimax
+except ImportError:
+    pass
+
+try:
+    from . import model_svr
+except ImportError:
+    pass
+
+try:
+    from . import model_lightgbm
+except ImportError:
+    pass
+
 # List of available models
-__all__ = ["model_lstm", "model_gru", "model_rf"]
+__all__ = [
+    "model_lstm",
+    "model_gru",
+    "model_rf",
+    "model_sarimax",
+    "model_svr",
+    "model_lightgbm",
+]

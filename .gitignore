@@ -27,3 +27,10 @@ saved_models/
 
 # Logs
 *.log
+best_params
+.claude
+train_models_notebook.ipynb
+results
+trained_models
+docs
+figures
