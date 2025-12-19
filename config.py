@@ -142,6 +142,35 @@ RF_CONFIG = {
     "n_jobs": -1,
 }
 
+# XGBoost Configuration
+XGBOOST_CONFIG = {
+    "n_estimators_options": [100, 200, 500],
+    "max_depth_options": [3, 5, 7],
+    "learning_rate": 0.1,
+    "subsample": 0.8,
+    "colsample_bytree": 0.8,
+    "n_jobs": -1,
+}
+
+# TCN (Temporal Convolutional Network) Configuration (task-specific)
+TCN_CONFIGS = {
+    "classification": {
+        "num_channels": [64, 64, 128, 128],  # Channel sizes for each TCN level
+        "kernel_size": 3,
+        "dropout_rate": 0.3,
+        "dense_units": 64,
+    },
+    "regression": {
+        "num_channels": [64, 128, 128, 256],  # More capacity for regression
+        "kernel_size": 3,
+        "dropout_rate": 0.4,  # Stronger regularization
+        "dense_units": 128,
+    },
+}
+
+# Legacy parameter (for backward compatibility)
+TCN_CONFIG = TCN_CONFIGS[TASK_TYPE]
+
 # =============================================================================
 # Utility Functions
 # =============================================================================
@@ -193,25 +222,27 @@ def get_early_stop_patience() -> int:
 def get_model_config(model_type: str) -> dict:
     """
     Get task-specific model configuration.
-    
+
     Args:
-        model_type: 'lstm' or 'gru'
-    
+        model_type: 'lstm', 'gru', or 'tcn'
+
     Returns:
         Configuration dict for the specified model and current task
-    
+
     Example:
         >>> lstm_cfg = get_model_config('lstm')
         >>> print(lstm_cfg['layer1_units'])  # 128 for classification, 256 for regression
     """
     model_type_lower = model_type.lower()
-    
+
     if model_type_lower == "lstm":
         return LSTM_CONFIGS[TASK_TYPE]
     elif model_type_lower == "gru":
         return GRU_CONFIGS[TASK_TYPE]
+    elif model_type_lower == "tcn":
+        return TCN_CONFIGS[TASK_TYPE]
     else:
-        raise ValueError(f"Unknown model type: {model_type}. Use 'lstm' or 'gru'.")
+        raise ValueError(f"Unknown model type: {model_type}. Use 'lstm', 'gru', or 'tcn'.")
 
 
 def get_task_name() -> str:
@@ -327,7 +358,9 @@ def print_config() -> None:
     print(f"\nModel Configurations ({TASK_TYPE}):")
     print(f"  LSTM: {get_model_config('lstm')}")
     print(f"  GRU: {get_model_config('gru')}")
+    print(f"  TCN: {get_model_config('tcn')}")
     print(f"  Random Forest: {RF_CONFIG}")
+    print(f"  XGBoost: {XGBOOST_CONFIG}")
     print("=" * 80)
 
 
@@ -368,6 +401,7 @@ if __name__ == "__main__":
     print(f"  get_early_stop_patience() = {get_early_stop_patience()}")
     print(f"  get_model_config('lstm') = {get_model_config('lstm')}")
     print(f"  get_model_config('gru') = {get_model_config('gru')}")
+    print(f"  get_model_config('tcn') = {get_model_config('tcn')}")
 
 
 

@@ -47,7 +47,7 @@ except ImportError:
 # Model imports for prediction (conditional)
 if PYTORCH_AVAILABLE:
     try:
-        from models import model_lstm, model_gru, model_rf
+        from models import model_lstm, model_gru, model_tcn, model_rf, model_xgboost
         MODELS_AVAILABLE = True
     except ImportError:
         MODELS_AVAILABLE = False
@@ -55,7 +55,9 @@ else:
     MODELS_AVAILABLE = False
     model_lstm = None
     model_gru = None
+    model_tcn = None
     model_rf = None
+    model_xgboost = None
 
 
 # =============================================================================
@@ -1182,7 +1184,7 @@ def run_ml_model_ui(data: pd.DataFrame):
     with col2:
         model_type = st.selectbox(
             "Model Type",
-            options=["LSTM", "GRU", "Random Forest"],
+            options=["LSTM", "GRU", "TCN", "Random Forest", "XGBoost"],
             help="Select the model architecture"
         )
     
@@ -1225,48 +1227,58 @@ def run_ml_model_ui(data: pd.DataFrame):
     
     # Model parameters
     st.subheader("Model Parameters")
-    
+
+    # Initialize seq_len BEFORE columns to ensure it's always defined
+    seq_len = config.SEQUENCE_LENGTH if model_type in ["LSTM", "GRU", "TCN"] else None
+
     col1, col2, col3 = st.columns(3)
-    
+
     with col1:
-        if model_type in ["LSTM", "GRU"]:
+        if model_type in ["LSTM", "GRU", "TCN"]:
             seq_len = st.slider(
                 "Sequence Length",
-                7, 30, config.SEQUENCE_LENGTH,
+                7, 30, seq_len,
                 help="Number of past days to use for prediction"
             )
         else:
-            seq_len = None
-            st.info("Random Forest uses tabular data (no sequences)")
-    
+            st.info(f"{model_type} uses tabular data (no sequences)")
+
     with col2:
         test_size = st.slider(
             "Test Split %",
             10, 30, int(config.TEST_SIZE * 100)
         ) / 100
-    
+
     with col3:
         val_size = st.slider(
             "Validation Split %",
             10, 30, int(config.VAL_SIZE * 100)
         ) / 100
-    
+
     # Run model button
     if st.button("Train and Evaluate Model", key="ml_run"):
         # Check if selected model requires PyTorch
-        if model_type in ["LSTM", "GRU"] and not PYTORCH_AVAILABLE:
+        if model_type in ["LSTM", "GRU", "TCN"] and not PYTORCH_AVAILABLE:
             st.error(f"{model_type} model requires PyTorch, but PyTorch is not installed.")
-            st.info("Please select Random Forest model, or install PyTorch: `pip install torch`")
+            st.info("Please select Random Forest or XGBoost model, or install PyTorch: `pip install torch`")
             return
-        
+
         waiting_statement()
-        
+
         try:
+            # Determine seq_len based on model type
+            # CRITICAL: Tabular models (RF, XGBoost) need seq_len=None
+            if model_type in ["LSTM", "GRU", "TCN"]:
+                final_seq_len = seq_len  # Use slider value
+            else:
+                final_seq_len = None  # Force None for tabular models
+
             # Step 1: Prepare data
             st.write("Loading and preprocessing data...")
+            st.write(f"DEBUG: Model={model_type}, seq_len={final_seq_len}")
             datasets = make_dataset_v2(
                 task_type=task_type,
-                seq_len=seq_len,  # None = tabular; int = sequence
+                seq_len=final_seq_len,  # None = tabular; int = sequence
                 test_size=test_size,
                 val_size=val_size,
                 scaler_type=config.SCALER_TYPE,
@@ -1277,19 +1289,25 @@ def run_ml_model_ui(data: pd.DataFrame):
             
             # Step 2: Train model
             st.write(f"Training {model_type} model...")
-            
+
             if model_type == "LSTM":
                 from models.model_lstm import train_and_predict
                 results = train_and_predict(datasets, config=None)
             elif model_type == "GRU":
                 from models.model_gru import train_and_predict
                 results = train_and_predict(
-                    datasets, 
+                    datasets,
                     config=None,
                     use_optuna=use_optuna,
                     optuna_trials=optuna_trials,
                     optuna_timeout=optuna_timeout
                 )
+            elif model_type == "TCN":
+                from models.model_tcn import train_and_predict
+                results = train_and_predict(datasets, config=None)
+            elif model_type == "XGBoost":
+                from models.model_xgboost import train_and_predict
+                results = train_and_predict(datasets, config=None)
             else:  # Random Forest
                 from models.model_rf import train_and_predict
                 results = train_and_predict(datasets, config=None)
