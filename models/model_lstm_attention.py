@@ -343,6 +343,27 @@ def train_and_predict(
     
     # Train model using standard training scheme
     print(f"Training LSTM for task: {task_type_to_use}")
+    
+    # Generate custom save path to distinguish from other LSTM variants
+    from datetime import datetime
+    if config is not None and config.get('save_best', False):
+        timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+        
+        # Build descriptive model name based on configuration
+        model_name_parts = []
+        if config.get('bidirectional', False):
+            model_name_parts.append('BiLSTM')
+        else:
+            model_name_parts.append('LSTM')
+        
+        if config.get('use_attention', False):
+            model_name_parts.append('Attention')
+        
+        model_name = '_'.join(model_name_parts)
+        save_path = f"saved_models/{model_name}_{task_type_to_use}_{timestamp}"
+    else:
+        save_path = None
+    
     model, history = standard_compile_and_train(
         model,
         X_train, y_train,
@@ -351,6 +372,7 @@ def train_and_predict(
         max_epochs=max_epochs,
         batch_size=batch_size,
         patience=patience,
+        save_path=save_path,
         verbose=1
     )
     

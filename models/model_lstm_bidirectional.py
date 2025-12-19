@@ -243,6 +243,15 @@ def train_and_predict(
     
     # Train model
     print(f"Training Bidirectional LSTM for task: {task_type_to_use}")
+    
+    # Generate custom save path to distinguish from other LSTM variants
+    from datetime import datetime
+    if config is not None and config.get('save_best', False):
+        timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+        save_path = f"saved_models/BiLSTM_{task_type_to_use}_{timestamp}"
+    else:
+        save_path = None
+    
     model, history = standard_compile_and_train(
         model,
         X_train, y_train,
@@ -251,6 +260,7 @@ def train_and_predict(
         max_epochs=max_epochs,
         batch_size=batch_size,
         patience=patience,
+        save_path=save_path,
         verbose=1
     )
     
