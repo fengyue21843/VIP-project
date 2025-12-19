@@ -3,3 +3,4 @@ LSTM + Attention,0.5568326947637292,0.5367156208277704,"bidirectional=False, att
 BiLSTM + Attention,0.5504469987228607,0.5654320987654321,"bidirectional=True, attention=True"
 BiLSTM (Bidirectional),0.545338441890166,0.5069252077562327,"bidirectional=True, attention=False"
 LSTM (Unidirectional),0.5402298850574713,0.47368421052631576,"bidirectional=False, attention=False"
+
