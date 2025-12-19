@@ -1,13 +1,15 @@
 """
-LSTM Model Module (Unidirectional)
+Bidirectional LSTM Model Module
 
-This module implements a standard unidirectional LSTM neural network.
+This module implements a bidirectional LSTM neural network.
 
 Architecture:
     - Input: (sequence_length, n_features)
-    - LSTM Layer 1: Configurable units with return_sequences=True
+    - Bidirectional LSTM Layer 1: Configurable units with return_sequences=True
+      * Processes sequence in both forward and backward directions
     - BatchNorm + Dropout
-    - LSTM Layer 2: Configurable units
+    - Bidirectional LSTM Layer 2: Configurable units
+      * Processes sequence in both forward and backward directions
     - BatchNorm + Dropout
     - Dense Hidden: Configurable units with ReLU activation
     - Output: 1 unit (no activation, handled by loss function)
@@ -56,25 +58,28 @@ def _normalize_task_type(task_type: str) -> str:
     return task_mapping[task_type]
 
 
-class LSTMModel(nn.Module):
+class BidirectionalLSTMModel(nn.Module):
     """
-    PyTorch Unidirectional LSTM Model.
+    PyTorch Bidirectional LSTM Model.
     
     Architecture:
-    - 2-layer unidirectional LSTM with BatchNorm and Dropout
+    - 2-layer bidirectional LSTM with BatchNorm and Dropout
     - Dense hidden layer with ReLU
     - Output layer (no activation, handled by loss)
+    
+    Note: Bidirectional LSTM doubles the hidden state size by concatenating
+    forward and backward directions.
     """
     
     def __init__(self, input_size: int, config: dict | None = None):
         """
-        Initialize LSTM model.
+        Initialize Bidirectional LSTM model.
         
         Args:
             input_size: Number of input features
             config: Configuration dict with architecture params
         """
-        super(LSTMModel, self).__init__()
+        super(BidirectionalLSTMModel, self).__init__()
         
         if config is None:
             config = LSTM_CONFIG
@@ -84,28 +89,29 @@ class LSTMModel(nn.Module):
         dropout_rate = config.get("dropout_rate", 0.2)
         dense_units = config.get("dense_units", 32)
         
-        # First LSTM layer (unidirectional)
+        # First LSTM layer (bidirectional)
         self.lstm1 = nn.LSTM(
             input_size,
             self.layer1_units,
             batch_first=True,
-            bidirectional=False
+            bidirectional=True  # Enable bidirectional processing
         )
-        self.bn1 = nn.BatchNorm1d(self.layer1_units)
+        # BatchNorm: bidirectional doubles the output size
+        self.bn1 = nn.BatchNorm1d(self.layer1_units * 2)
         self.dropout1 = nn.Dropout(dropout_rate)
         
-        # Second LSTM layer (unidirectional)
+        # Second LSTM layer (bidirectional)
         self.lstm2 = nn.LSTM(
-            self.layer1_units,
+            self.layer1_units * 2,  # Input from bidirectional layer 1
             self.layer2_units,
             batch_first=True,
-            bidirectional=False
+            bidirectional=True  # Enable bidirectional processing
         )
-        self.bn2 = nn.BatchNorm1d(self.layer2_units)
+        self.bn2 = nn.BatchNorm1d(self.layer2_units * 2)
         self.dropout2 = nn.Dropout(dropout_rate)
         
-        # Dense layers
-        self.fc1 = nn.Linear(self.layer2_units, dense_units)
+        # Dense layers (input size doubled due to bidirectional)
+        self.fc1 = nn.Linear(self.layer2_units * 2, dense_units)
         self.relu = nn.ReLU()
         self.dropout3 = nn.Dropout(dropout_rate * 0.5)
         self.fc2 = nn.Linear(dense_units, 1)
@@ -130,8 +136,12 @@ class LSTMModel(nn.Module):
         
         # Second LSTM layer
         lstm_out, (h_n, _) = self.lstm2(lstm_out)
-        # Use last hidden state from last layer
-        h_n = h_n[-1]
+        # h_n shape: (num_layers * num_directions, batch, hidden_size)
+        # For bidirectional: num_directions = 2
+        
+        # Concatenate forward and backward hidden states from last layer
+        # h_n[-2]: forward direction, h_n[-1]: backward direction
+        h_n = torch.cat([h_n[-2], h_n[-1]], dim=1)
         
         h_n = self.bn2(h_n)
         h_n = self.dropout2(h_n)
@@ -145,9 +155,9 @@ class LSTMModel(nn.Module):
         return out
 
 
-def build_lstm(input_shape: tuple, config: dict | None = None) -> nn.Module:
+def build_lstm_bidirectional(input_shape: tuple, config: dict | None = None) -> nn.Module:
     """
-    Build the unidirectional LSTM architecture.
+    Build the bidirectional LSTM architecture.
     
     Args:
         input_shape: Shape of input data (sequence_length, n_features)
@@ -162,8 +172,12 @@ def build_lstm(input_shape: tuple, config: dict | None = None) -> nn.Module:
     
     Example:
         ```python
-        model = build_lstm(input_shape=(14, 20))
+        model = build_lstm_bidirectional(input_shape=(14, 20))
         ```
+    
+    Note:
+        Bidirectional LSTM has approximately 2x the parameters of unidirectional LSTM
+        due to processing in both directions.
     """
     if config is None:
         config = LSTM_CONFIG
@@ -172,7 +186,7 @@ def build_lstm(input_shape: tuple, config: dict | None = None) -> nn.Module:
     _, n_features = input_shape
     
     # Build and return model
-    model = LSTMModel(n_features, config)
+    model = BidirectionalLSTMModel(n_features, config)
     
     return model
 
@@ -182,7 +196,7 @@ def train_and_predict(
     config: dict | None = None
 ) -> Dict[str, Any]:
     """
-    Standard model interface for LSTM.
+    Standard model interface for Bidirectional LSTM.
     
     Args:
         datasets: dict from make_dataset_v2() containing training/validation/test data
@@ -208,8 +222,12 @@ def train_and_predict(
     input_shape = (seq_len, n_features)
     
     # Build model
-    print(f"Building Unidirectional LSTM with input shape: {input_shape}")
-    model = build_lstm(input_shape, config)
+    print(f"Building Bidirectional LSTM with input shape: {input_shape}")
+    model = build_lstm_bidirectional(input_shape, config)
+    
+    # Count parameters
+    total_params = sum(p.numel() for p in model.parameters() if p.requires_grad)
+    print(f"Total trainable parameters: {total_params:,}")
     
     # Extract training parameters
     if config is not None:
@@ -224,7 +242,7 @@ def train_and_predict(
         task_type_to_use = _normalize_task_type(TASK_TYPE)
     
     # Train model
-    print(f"Training Unidirectional LSTM for task: {task_type_to_use}")
+    print(f"Training Bidirectional LSTM for task: {task_type_to_use}")
     model, history = standard_compile_and_train(
         model,
         X_train, y_train,
@@ -263,9 +281,9 @@ def train_and_predict(
 
 
 if __name__ == "__main__":
-    """Run LSTM model training"""
+    """Run Bidirectional LSTM model training"""
     print("=" * 80)
-    print("Unidirectional LSTM Model - Training and Prediction")
+    print("Bidirectional LSTM Model - Training and Prediction")
     print("=" * 80)
     
     from data_pipeline_v2 import make_dataset_v2
@@ -280,7 +298,7 @@ if __name__ == "__main__":
     print(f"  X_test: {datasets['X_test'].shape}")
     
     print("\n" + "=" * 80)
-    print("Training Unidirectional LSTM")
+    print("Training Bidirectional LSTM")
     print("=" * 80)
     
     results = train_and_predict(datasets, config=LSTM_CONFIG)
