@@ -162,10 +162,10 @@ if model_lightgbm is not None:
 # Helper Functions
 # =============================================================================
 
-def run_single_model(name: str, spec: Dict[str, Any]) -> Dict[str, Any]:
+def run_single_model(name: str, spec: Dict[str, Any], no_tuning: bool = True) -> Dict[str, Any]:
     """
     Run one model end-to-end: data → train → evaluate
-    
+
     Args:
         name: Model name (key in registry)
         spec: Model specification dict with keys:
@@ -173,7 +173,8 @@ def run_single_model(name: str, spec: Dict[str, Any]) -> Dict[str, Any]:
               - task_type: "sign" or "price"
               - seq_len: Sequence length (int or None for tabular)
               - description: Human-readable description
-    
+        no_tuning: If True, disable hyperparameter tuning for faster execution
+
     Returns:
         Dict with all results:
         - model_name: str
@@ -186,6 +187,14 @@ def run_single_model(name: str, spec: Dict[str, Any]) -> Dict[str, Any]:
     task_type = spec["task_type"]
     seq_len = spec["seq_len"]
     description = spec.get("description", "")
+
+    # Config to disable hyperparameter tuning for faster execution
+    fast_config = {
+        "tune_hyperparams": False,
+        "n_trials": 5,  # Reduced if tuning is somehow enabled
+        "n_iter": 5,    # For SVR
+        "cv_folds": 3,
+    } if no_tuning else None
     
     print(f"\n{'='*80}")
     print(f"Running: {name}")
@@ -213,7 +222,7 @@ def run_single_model(name: str, spec: Dict[str, Any]) -> Dict[str, Any]:
     
     # Step 2: Train & predict using standard interface
     print(f"\n[2/3] Training model...")
-    out = module.train_and_predict(datasets, config=None)
+    out = module.train_and_predict(datasets, config=fast_config)
     
     y_test = datasets["y_test"]
     y_pred_test = out["y_pred_test"]
@@ -376,10 +385,10 @@ def main():
     all_results = []
     failed_models = []
     
-    # Run each model
+    # Run each model (no_tuning=True for faster execution)
     for name, spec in MODEL_REGISTRY.items():
         try:
-            result = run_single_model(name, spec)
+            result = run_single_model(name, spec, no_tuning=True)
             all_results.append(result)
             
         except Exception as e:
