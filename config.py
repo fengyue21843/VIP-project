@@ -142,6 +142,77 @@ RF_CONFIG = {
     "n_jobs": -1,
 }
 
+# SARIMAX Configuration (Seasonal ARIMA with Exogenous Variables)
+SARIMAX_CONFIG = {
+    "order": (2, 1, 2),                     # (p, d, q) - AR, differencing, MA orders
+    "seasonal_order": (1, 1, 1, 7),         # (P, D, Q, s) - seasonal components, s=7 for weekly
+    "use_auto_arima": True,                 # Auto-select best orders using AIC
+    "max_p": 5,                             # Max AR order for auto selection
+    "max_q": 5,                             # Max MA order for auto selection
+    "max_d": 2,                             # Max differencing order
+    "max_P": 2,                             # Max seasonal AR order
+    "max_Q": 2,                             # Max seasonal MA order
+    "seasonal_period": 7,                   # Seasonal period (7=weekly, 30=monthly)
+    "exog_cols": [                          # Exogenous variables to include
+        "gas_price",
+        "temperature",
+        "pjm_load",
+        "IS_WORKDAY",
+    ],
+    "max_history": 1000,                    # Sliding window for rolling forecast
+    "use_fast_forecast": True,              # Fast mode: single fit, multi-step forecast (50x faster)
+    "refit_interval": 50,                   # Rolling mode only: refit every N steps
+}
+
+# SVR Configuration (Support Vector Regression)
+SVR_CONFIG = {
+    "kernel": "rbf",                        # Kernel type: 'rbf', 'linear', 'poly'
+    "C": 100,                               # Regularization parameter
+    "epsilon": 0.1,                         # Epsilon in epsilon-SVR model
+    "gamma": "scale",                       # Kernel coefficient: 'scale', 'auto', or float
+    "tune_hyperparams": True,               # Whether to tune hyperparameters
+    "cv_folds": 5,                          # TimeSeriesSplit folds
+    "n_iter": 50,                           # Number of iterations for RandomizedSearchCV
+    "param_grid": {                         # Hyperparameter search space
+        "C": [0.1, 1, 10, 100, 1000],
+        "epsilon": [0.01, 0.1, 0.5, 1.0],
+        "gamma": ["scale", "auto", 0.001, 0.01, 0.1],
+        "kernel": ["rbf", "poly"],
+    },
+    "n_features": 50,                       # Number of features to use (feature selection)
+}
+
+# LightGBM Configuration
+LIGHTGBM_CONFIG = {
+    "n_estimators": 1000,                   # Number of boosting rounds
+    "learning_rate": 0.05,                  # Learning rate
+    "max_depth": 7,                         # Max tree depth (-1 for no limit)
+    "num_leaves": 63,                       # Max number of leaves per tree
+    "min_child_samples": 20,                # Min samples in a leaf
+    "subsample": 0.8,                       # Row subsampling ratio
+    "colsample_bytree": 0.8,                # Column subsampling ratio
+    "reg_alpha": 0.1,                       # L1 regularization
+    "reg_lambda": 1.0,                      # L2 regularization
+    "early_stopping_rounds": 50,            # Early stopping patience
+    "tune_hyperparams": True,               # Whether to tune with Optuna
+    "n_trials": 100,                        # Number of Optuna trials
+    "cv_folds": 5,                          # TimeSeriesSplit folds
+    "param_bounds": {                       # Optuna search bounds
+        "n_estimators": (100, 2000),
+        "learning_rate": (0.01, 0.3),
+        "max_depth": (3, 12),
+        "num_leaves": (20, 300),
+        "min_child_samples": (5, 100),
+        "subsample": (0.5, 1.0),
+        "colsample_bytree": (0.5, 1.0),
+        "reg_alpha": (1e-8, 10.0),
+        "reg_lambda": (1e-8, 10.0),
+    },
+    "verbose": -1,                          # Suppress LightGBM output
+    "device": "cpu",                        # Device: "cpu" or "gpu" (requires GPU build)
+    "gpu_use_dp": False,                    # Use double precision on GPU (slower but more accurate)
+}
+
 # =============================================================================
 # Utility Functions
 # =============================================================================
@@ -328,6 +399,9 @@ def print_config() -> None:
     print(f"  LSTM: {get_model_config('lstm')}")
     print(f"  GRU: {get_model_config('gru')}")
     print(f"  Random Forest: {RF_CONFIG}")
+    print(f"  SARIMAX: {SARIMAX_CONFIG}")
+    print(f"  SVR: {SVR_CONFIG}")
+    print(f"  LightGBM: {LIGHTGBM_CONFIG}")
     print("=" * 80)
 
 

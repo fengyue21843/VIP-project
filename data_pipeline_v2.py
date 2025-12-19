@@ -413,8 +413,8 @@ def make_dataset_v2(
         val_size = config.VAL_SIZE
     if scaler_type is None:
         scaler_type = config.SCALER_TYPE
-    if seq_len is None:
-        seq_len = getattr(config, 'SEQUENCE_LENGTH', None)
+    # Note: seq_len=None means tabular data (no sequences)
+    # Only use config default if seq_len is not explicitly passed
     if random_seed is None:
         random_seed = config.RANDOM_SEED
     
