@@ -1182,46 +1182,10 @@ def run_ml_model_ui(data: pd.DataFrame):
     with col2:
         model_type = st.selectbox(
             "Model Type",
-            options=["LightGBM", "SVR", "SARIMAX", "LSTM", "GRU", "Random Forest"],
+            options=["LSTM", "GRU", "RNN", "BiRNN", "RNN+Attention", "LSTM+Attention", "BiLSTM",
+                     "TCN", "Random Forest", "XGBoost", "LightGBM", "SVR", "SARIMAX"],
             help="Select the model architecture"
         )
-    
-    # Optuna hyperparameter optimization (only for GRU)
-    use_optuna = False
-    optuna_trials = 20
-    optuna_timeout = None
-    
-    if model_type == "GRU":
-        st.subheader("Hyperparameter Optimization (Optuna)")
-        use_optuna = st.checkbox(
-            "Enable Optuna Hyperparameter Optimization",
-            value=False,
-            help="Automatically find the best hyperparameters using Optuna. This will take longer but may improve model performance."
-        )
-        
-        if use_optuna:
-            col_opt1, col_opt2 = st.columns(2)
-            with col_opt1:
-                optuna_trials = st.number_input(
-                    "Number of Trials",
-                    min_value=5,
-                    max_value=100,
-                    value=20,
-                    step=5,
-                    help="More trials = better results but longer time"
-                )
-            with col_opt2:
-                optuna_timeout_min = st.number_input(
-                    "Timeout (minutes, 0 = no timeout)",
-                    min_value=0,
-                    max_value=120,
-                    value=0,
-                    step=5,
-                    help="Maximum time to spend on optimization"
-                )
-                optuna_timeout = optuna_timeout_min * 60 if optuna_timeout_min > 0 else None
-            
-            st.info(f"⚠️ Optimization will run {optuna_trials} trials. This may take several minutes.")
     
     # Model parameters
     st.subheader("Model Parameters")
@@ -1229,7 +1193,9 @@ def run_ml_model_ui(data: pd.DataFrame):
     col1, col2, col3 = st.columns(3)
     
     with col1:
-        if model_type in ["LSTM", "GRU"]:
+        # Sequential models need sequence length
+        sequential_models = ["LSTM", "GRU", "RNN", "BiRNN", "RNN+Attention", "LSTM+Attention", "BiLSTM", "TCN"]
+        if model_type in sequential_models:
             seq_len = st.slider(
                 "Sequence Length",
                 7, 30, config.SEQUENCE_LENGTH,
@@ -1243,6 +1209,8 @@ def run_ml_model_ui(data: pd.DataFrame):
                 st.info("SVR - Support Vector Regression with RBF kernel")
             elif model_type == "SARIMAX":
                 st.info("SARIMAX - Seasonal ARIMA with exogenous variables")
+            elif model_type == "XGBoost":
+                st.info("XGBoost - Extreme gradient boosting with hyperparameter search")
             else:
                 st.info("Random Forest uses tabular data (no sequences)")
     
@@ -1261,9 +1229,10 @@ def run_ml_model_ui(data: pd.DataFrame):
     # Run model button
     if st.button("Train and Evaluate Model", key="ml_run"):
         # Check if selected model requires PyTorch
-        if model_type in ["LSTM", "GRU"] and not PYTORCH_AVAILABLE:
+        pytorch_models = ["LSTM", "GRU", "RNN", "BiRNN", "RNN+Attention", "LSTM+Attention", "BiLSTM", "TCN"]
+        if model_type in pytorch_models and not PYTORCH_AVAILABLE:
             st.error(f"{model_type} model requires PyTorch, but PyTorch is not installed.")
-            st.info("Please select LightGBM, SVR, SARIMAX, or Random Forest, or install PyTorch: `pip install torch`")
+            st.info("Please select LightGBM, SVR, SARIMAX, XGBoost, or Random Forest, or install PyTorch: `pip install torch`")
             return
         
         waiting_statement()
@@ -1290,13 +1259,7 @@ def run_ml_model_ui(data: pd.DataFrame):
                 results = train_and_predict(datasets, config=None)
             elif model_type == "GRU":
                 from models.model_gru import train_and_predict
-                results = train_and_predict(
-                    datasets,
-                    config=None,
-                    use_optuna=use_optuna,
-                    optuna_trials=optuna_trials,
-                    optuna_timeout=optuna_timeout
-                )
+                results = train_and_predict(datasets, config=None)
             elif model_type == "LightGBM":
                 from models.model_lightgbm import train_and_predict
                 results = train_and_predict(datasets, config=None)
@@ -1305,6 +1268,27 @@ def run_ml_model_ui(data: pd.DataFrame):
                 results = train_and_predict(datasets, config=None)
             elif model_type == "SARIMAX":
                 from models.model_sarimax import train_and_predict
+                results = train_and_predict(datasets, config=None)
+            elif model_type == "TCN":
+                from models.model_tcn import train_and_predict
+                results = train_and_predict(datasets, config=None)
+            elif model_type == "RNN":
+                from models.model_rnn import train_and_predict
+                results = train_and_predict(datasets, config_dict=None)
+            elif model_type == "BiRNN":
+                from models.model_rnn_bidir import train_and_predict
+                results = train_and_predict(datasets, config_dict=None)
+            elif model_type == "RNN+Attention":
+                from models.model_rnn_attn import train_and_predict
+                results = train_and_predict(datasets, config_dict=None)
+            elif model_type == "LSTM+Attention":
+                from models.model_lstm_attention import train_and_predict
+                results = train_and_predict(datasets, config=None)
+            elif model_type == "BiLSTM":
+                from models.model_lstm_bidirectional import train_and_predict
+                results = train_and_predict(datasets, config=None)
+            elif model_type == "XGBoost":
+                from models.model_xgboost import train_and_predict
                 results = train_and_predict(datasets, config=None)
             else:  # Random Forest
                 from models.model_rf import train_and_predict
@@ -1323,32 +1307,7 @@ def run_ml_model_ui(data: pd.DataFrame):
             )
             
             success_statement()
-            
-            # Display Optuna results if available
-            if model_type == "GRU" and "optuna_results" in results:
-                st.subheader("Optuna Optimization Results")
-                optuna_results = results["optuna_results"]
-                
-                col1, col2, col3 = st.columns(3)
-                with col1:
-                    st.metric("Best Validation Score", f"{optuna_results['best_value']:.4f}")
-                with col2:
-                    st.metric("Trials Completed", optuna_results["n_trials"])
-                with col3:
-                    st.metric("Status", "✓ Complete")
-                
-                with st.expander("Best Hyperparameters Found"):
-                    best_config = optuna_results["best_config"]
-                    st.json(best_config)
-                    
-                    # Show hyperparameter importance if available
-                    try:
-                        import optuna.visualization as vis
-                        importance_fig = vis.plot_param_importances(optuna_results["study"])
-                        st.plotly_chart(importance_fig, use_container_width=True)
-                    except Exception:
-                        pass
-            
+
             # Display results
             st.subheader("Model Performance")
             

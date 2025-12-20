@@ -27,7 +27,7 @@ TASK_TYPE_MAPPING = {
 # =============================================================================
 
 # Data file path
-DATA_PATH = "datasets/Data_cleaned_Dataset.csv"  # Path to the data file
+DATA_PATH = "dataset/Data_cleaned_Dataset.csv"  # Path to the data file
 
 # Sequence length for RNN models (LSTM, GRU)
 # None = tabular data for traditional ML models (RF, etc.)
@@ -211,6 +211,26 @@ LIGHTGBM_CONFIG = {
     "verbose": -1,                          # Suppress LightGBM output
     "device": "cpu",                        # Device: "cpu" or "gpu" (requires GPU build)
     "gpu_use_dp": False,                    # Use double precision on GPU (slower but more accurate)
+}
+
+# TCN Configuration (Temporal Convolutional Network)
+TCN_CONFIG = {
+    "kernel_size": 3,                       # Kernel size for convolutions
+    "num_filters": 128,                     # Number of filters per TCN layer
+    "num_layers": 3,                        # Number of TCN blocks
+    "dropout": 0.3,                         # Dropout rate
+    "dense_units": 32,                      # Dense layer units before output
+    "learning_rate": 1e-3,                  # Learning rate for Adam optimizer
+}
+
+# XGBoost Configuration
+XGBOOST_CONFIG = {
+    "n_estimators_options": [100, 200, 500],  # Number of boosting rounds to try
+    "max_depth_options": [3, 5, 7],           # Maximum tree depth options
+    "learning_rate": 0.1,                     # Learning rate (eta)
+    "subsample": 0.8,                         # Subsample ratio of training instances
+    "colsample_bytree": 0.8,                  # Subsample ratio of columns when constructing each tree
+    "n_jobs": -1,                             # Number of parallel threads (-1 = use all cores)
 }
 
 # =============================================================================
@@ -398,10 +418,12 @@ def print_config() -> None:
     print(f"\nModel Configurations ({TASK_TYPE}):")
     print(f"  LSTM: {get_model_config('lstm')}")
     print(f"  GRU: {get_model_config('gru')}")
+    print(f"  TCN: {TCN_CONFIG}")
     print(f"  Random Forest: {RF_CONFIG}")
+    print(f"  XGBoost: {XGBOOST_CONFIG}")
+    print(f"  LightGBM: {LIGHTGBM_CONFIG}")
     print(f"  SARIMAX: {SARIMAX_CONFIG}")
     print(f"  SVR: {SVR_CONFIG}")
-    print(f"  LightGBM: {LIGHTGBM_CONFIG}")
     print("=" * 80)
 
 

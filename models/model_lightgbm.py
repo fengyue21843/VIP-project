@@ -10,8 +10,6 @@ LightGBM Features:
     - Built-in feature importance for interpretability
     - Robust to regime changes (COVID-2020, 2022 energy crisis)
     - Leaf-wise tree growth for better accuracy
-
-Hyperparameter tuning via Optuna Bayesian optimization with TimeSeriesSplit CV.
 """
 
 import numpy as np
@@ -30,16 +28,6 @@ except ImportError:
     LIGHTGBM_AVAILABLE = False
     print("Warning: LightGBM not available. Install with: pip install lightgbm")
 
-try:
-    import optuna
-    from optuna.samplers import TPESampler
-    OPTUNA_AVAILABLE = True
-    optuna.logging.set_verbosity(optuna.logging.WARNING)
-except ImportError:
-    OPTUNA_AVAILABLE = False
-    print("Warning: Optuna not available. Hyperparameter tuning disabled.")
-
-from sklearn.model_selection import TimeSeriesSplit, cross_val_score
 from sklearn.metrics import mean_absolute_error, mean_squared_error, accuracy_score
 
 from config import TASK_TYPE, LIGHTGBM_CONFIG, RANDOM_SEED
@@ -59,113 +47,6 @@ def get_feature_importance(
     return dict(sorted_importance[:top_n])
 
 
-def tune_lightgbm_optuna(
-    X_train: np.ndarray,
-    y_train: np.ndarray,
-    X_val: np.ndarray,
-    y_val: np.ndarray,
-    config: dict,
-    is_classification: bool = False,
-) -> Dict[str, Any]:
-    """
-    Tune LightGBM hyperparameters using Optuna Bayesian optimization.
-
-    Returns:
-        Best hyperparameters dict
-    """
-    if not OPTUNA_AVAILABLE:
-        print("  Optuna not available, using default params")
-        return {}
-
-    n_trials = config.get("n_trials", 100)
-    cv_folds = config.get("cv_folds", 5)
-    param_bounds = config.get("param_bounds", {})
-
-    print(f"  Tuning LightGBM with Optuna ({n_trials} trials)...")
-
-    def objective(trial):
-        params = {
-            'n_estimators': trial.suggest_int(
-                'n_estimators',
-                param_bounds.get('n_estimators', (100, 2000))[0],
-                param_bounds.get('n_estimators', (100, 2000))[1]
-            ),
-            'learning_rate': trial.suggest_float(
-                'learning_rate',
-                param_bounds.get('learning_rate', (0.01, 0.3))[0],
-                param_bounds.get('learning_rate', (0.01, 0.3))[1],
-                log=True
-            ),
-            'max_depth': trial.suggest_int(
-                'max_depth',
-                param_bounds.get('max_depth', (3, 12))[0],
-                param_bounds.get('max_depth', (3, 12))[1]
-            ),
-            'num_leaves': trial.suggest_int(
-                'num_leaves',
-                param_bounds.get('num_leaves', (20, 300))[0],
-                param_bounds.get('num_leaves', (20, 300))[1]
-            ),
-            'min_child_samples': trial.suggest_int(
-                'min_child_samples',
-                param_bounds.get('min_child_samples', (5, 100))[0],
-                param_bounds.get('min_child_samples', (5, 100))[1]
-            ),
-            'subsample': trial.suggest_float(
-                'subsample',
-                param_bounds.get('subsample', (0.5, 1.0))[0],
-                param_bounds.get('subsample', (0.5, 1.0))[1]
-            ),
-            'colsample_bytree': trial.suggest_float(
-                'colsample_bytree',
-                param_bounds.get('colsample_bytree', (0.5, 1.0))[0],
-                param_bounds.get('colsample_bytree', (0.5, 1.0))[1]
-            ),
-            'reg_alpha': trial.suggest_float(
-                'reg_alpha',
-                param_bounds.get('reg_alpha', (1e-8, 10.0))[0],
-                param_bounds.get('reg_alpha', (1e-8, 10.0))[1],
-                log=True
-            ),
-            'reg_lambda': trial.suggest_float(
-                'reg_lambda',
-                param_bounds.get('reg_lambda', (1e-8, 10.0))[0],
-                param_bounds.get('reg_lambda', (1e-8, 10.0))[1],
-                log=True
-            ),
-            'random_state': RANDOM_SEED,
-            'verbose': -1,
-            'n_jobs': -1,
-        }
-
-        # Add GPU if configured
-        if config.get('device', 'cpu') == 'gpu':
-            params['device'] = 'gpu'
-            params['gpu_use_dp'] = config.get('gpu_use_dp', False)
-
-        if is_classification:
-            model = lgb.LGBMClassifier(**params)
-            tscv = TimeSeriesSplit(n_splits=cv_folds)
-            scores = cross_val_score(model, X_train, y_train, cv=tscv, scoring='accuracy')
-            return scores.mean()
-        else:
-            model = lgb.LGBMRegressor(**params)
-            tscv = TimeSeriesSplit(n_splits=cv_folds)
-            scores = cross_val_score(model, X_train, y_train, cv=tscv, scoring='neg_mean_absolute_error')
-            return -scores.mean()  # Return positive MAE
-
-    # Create Optuna study
-    sampler = TPESampler(seed=RANDOM_SEED)
-    direction = 'maximize' if is_classification else 'minimize'
-    study = optuna.create_study(direction=direction, sampler=sampler)
-
-    study.optimize(objective, n_trials=n_trials, show_progress_bar=False)
-
-    print(f"  Best trial: {study.best_trial.number}")
-    print(f"  Best value: {study.best_value:.6f}")
-    print(f"  Best params: {study.best_params}")
-
-    return study.best_params
 
 
 def train_lightgbm(
@@ -177,7 +58,7 @@ def train_lightgbm(
     is_classification: bool = False,
 ) -> Tuple[Any, Dict[str, Any]]:  # Returns (LGBMModel, best_params)
     """
-    Train LightGBM model with optional hyperparameter tuning.
+    Train LightGBM model with default hyperparameters.
 
     Returns:
         Tuple of (trained_model, best_params)
@@ -185,30 +66,22 @@ def train_lightgbm(
     if config is None:
         config = LIGHTGBM_CONFIG
 
-    if config.get("tune_hyperparams", True) and OPTUNA_AVAILABLE:
-        best_params = tune_lightgbm_optuna(
-            X_train, y_train, X_val, y_val, config, is_classification
-        )
-        # Add fixed params
-        best_params['random_state'] = RANDOM_SEED
-        best_params['verbose'] = config.get('verbose', -1)
-        best_params['n_jobs'] = -1
-    else:
-        best_params = {
-            'n_estimators': config.get('n_estimators', 1000),
-            'learning_rate': config.get('learning_rate', 0.05),
-            'max_depth': config.get('max_depth', 7),
-            'num_leaves': config.get('num_leaves', 63),
-            'min_child_samples': config.get('min_child_samples', 20),
-            'subsample': config.get('subsample', 0.8),
-            'colsample_bytree': config.get('colsample_bytree', 0.8),
-            'reg_alpha': config.get('reg_alpha', 0.1),
-            'reg_lambda': config.get('reg_lambda', 1.0),
-            'random_state': RANDOM_SEED,
-            'verbose': config.get('verbose', -1),
-            'n_jobs': -1,
-        }
-        print(f"  Using default params")
+    # Use default parameters (Optuna removed)
+    best_params = {
+        'n_estimators': config.get('n_estimators', 1000),
+        'learning_rate': config.get('learning_rate', 0.05),
+        'max_depth': config.get('max_depth', 7),
+        'num_leaves': config.get('num_leaves', 63),
+        'min_child_samples': config.get('min_child_samples', 20),
+        'subsample': config.get('subsample', 0.8),
+        'colsample_bytree': config.get('colsample_bytree', 0.8),
+        'reg_alpha': config.get('reg_alpha', 0.1),
+        'reg_lambda': config.get('reg_lambda', 1.0),
+        'random_state': RANDOM_SEED,
+        'verbose': config.get('verbose', -1),
+        'n_jobs': -1,
+    }
+    print(f"  Using default hyperparameters")
 
     # Add GPU settings if specified
     device = config.get('device', 'cpu')
@@ -248,7 +121,7 @@ def train_and_predict(
     Standard model interface for LightGBM.
 
     Handles both classification and regression tasks.
-    Performs Optuna-based hyperparameter tuning.
+    Uses default hyperparameters with early stopping.
     """
     if not LIGHTGBM_AVAILABLE:
         raise ImportError("LightGBM required. Install with: pip install lightgbm")
@@ -284,7 +157,6 @@ def train_and_predict(
     print(f"  Validation samples: {len(X_val)}")
     print(f"  Test samples: {len(X_test)}")
     print(f"  Features: {X_train.shape[1]}")
-    print(f"  Hyperparameter tuning: {config.get('tune_hyperparams', True)}")
 
     # Train model
     print("\nTraining LightGBM model...")
@@ -386,23 +258,18 @@ if __name__ == "__main__":
         scaler_type="standard"
     )
 
-    # Quick test config (reduced trials for speed)
+    # Test config (using default hyperparameters)
     test_config = {
-        "tune_hyperparams": True,
-        "n_trials": 10,
-        "cv_folds": 3,
+        "n_estimators": 500,
+        "learning_rate": 0.05,
+        "max_depth": 7,
+        "num_leaves": 63,
+        "min_child_samples": 20,
+        "subsample": 0.8,
+        "colsample_bytree": 0.8,
+        "reg_alpha": 0.1,
+        "reg_lambda": 1.0,
         "early_stopping_rounds": 20,
-        "param_bounds": {
-            "n_estimators": (100, 500),
-            "learning_rate": (0.05, 0.2),
-            "max_depth": (3, 7),
-            "num_leaves": (20, 100),
-            "min_child_samples": (10, 50),
-            "subsample": (0.7, 1.0),
-            "colsample_bytree": (0.7, 1.0),
-            "reg_alpha": (0.01, 1.0),
-            "reg_lambda": (0.01, 1.0),
-        },
         "verbose": -1,
     }
 
